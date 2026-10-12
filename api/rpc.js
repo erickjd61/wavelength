@@ -17,7 +17,8 @@ async function redis(cmds) {
 }
 const hash = (pin) => crypto.createHash('sha256').update('wl:' + String(pin)).digest('hex');
 const K = (code, part) => 'wl:c:' + code + ':' + part;
-const parts = ['meta', 's', 'g', 'seen', 'ans', 'conn', 'v'];
+const parts = ['meta', 's', 'g', 'seen', 'ans', 'conn', 'v', 'done'];
+const PUBLIC_BASE = process.env.VERCEL_PROJECT_PRODUCTION_URL ? 'https://' + process.env.VERCEL_PROJECT_PRODUCTION_URL.replace(/^https?:\/\//, '') : null;
 const obj = (flat) => { const o = {}; for (let i = 0; flat && i < flat.length; i += 2) o[flat[i]] = flat[i + 1]; return o; };
 const jparse = (s, d) => { try { return s == null ? d : JSON.parse(s); } catch (_) { return d; } };
 const clean = (s, n) => String(s == null ? '' : s).replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, n);
@@ -33,9 +34,9 @@ const DEFAULT_Q = [
 ];
 
 async function load(code) {
-  const [meta, s, g, seen, ans, conn, v] = await redis([
+  const [meta, s, g, seen, ans, conn, v, dn] = await redis([
     ['GET', K(code, 'meta')], ['HGETALL', K(code, 's')], ['HGETALL', K(code, 'g')], ['HGETALL', K(code, 'seen')],
-    ['HGETALL', K(code, 'ans')], ['HGETALL', K(code, 'conn')], ['GET', K(code, 'v')],
+    ['HGETALL', K(code, 'ans')], ['HGETALL', K(code, 'conn')], ['GET', K(code, 'v')], ['HGETALL', K(code, 'done')],
   ]);
   if (!meta) return null;
   const students = {}; const so = obj(s);
@@ -44,7 +45,8 @@ async function load(code) {
   const seenO = {}; const se = obj(seen); for (const id in se) seenO[id] = Number(se[id]);
   const answers = {}; const ao = obj(ans); for (const id in ao) answers[id] = jparse(ao[id], {});
   const conns = {}; const co = obj(conn); for (const id in co) conns[id] = jparse(co[id], []);
-  return { meta: jparse(meta, {}), students, groups, seen: seenO, answers, conns, v: Number(v || 0) };
+  const done = {}; const dno = obj(dn); for (const id in dno) done[id] = Number(dno[id]);
+  return { meta: jparse(meta, {}), students, groups, seen: seenO, answers, conns, done, v: Number(v || 0) };
 }
 
 function present(st) { return Object.values(st.students).filter(p => p && p.status === 'active'); }
@@ -66,11 +68,11 @@ function forStudent(st, sid, now) {
     return { id, name: p.name, email: p.shareEmail ? p.email : '', linkedin: p.shareLinkedin ? p.linkedin : '', g: st.groups[id] };
   }).filter(Boolean);
   const { scripts, ...meta } = publicMeta(st.meta);
-  return { v: st.v, now, meta, roster, me: me ? { ...me, g: st.groups[sid], conns: myConns, answers: st.answers[sid] || {} } : null };
+  return { v: st.v, now, base: PUBLIC_BASE, meta, roster, me: me ? { ...me, g: st.groups[sid], conns: myConns, answers: st.answers[sid] || {}, doneRound: st.done[sid] != null ? st.done[sid] : null } : null };
 }
 function forScreen(st, now) {
   const { scripts, introQuestions, ...meta } = publicMeta(st.meta);
-  return { v: st.v, now, meta, roster: present(st).map(p => ({ id: p.id, name: p.name, g: st.groups[p.id], nophone: !!p.nophone })) };
+  return { v: st.v, now, base: PUBLIC_BASE, meta, roster: present(st).map(p => ({ id: p.id, name: p.name, g: st.groups[p.id], nophone: !!p.nophone })) };
 }
 function forTeacher(st, now) {
   const answers = {};
@@ -79,7 +81,8 @@ function forTeacher(st, now) {
     answers[id] = { anon: !!p.anon, name: p.anon ? null : p.name, a: st.answers[id] };
   }
   const connCounts = {}; for (const id in st.conns) connCounts[id] = (st.conns[id] || []).length;
-  return { v: st.v, now, meta: publicMeta(st.meta), students: Object.values(st.students).filter(Boolean), groups: st.groups, seen: st.seen, answers, connCounts };
+  const doneIds = Object.keys(st.done).filter(id => st.done[id] === (st.meta.round || 0));
+  return { v: st.v, now, base: PUBLIC_BASE, meta: publicMeta(st.meta), students: Object.values(st.students).filter(Boolean), groups: st.groups, seen: st.seen, answers, connCounts, doneIds };
 }
 
 const bump = (code) => ['INCR', K(code, 'v')];
@@ -98,8 +101,9 @@ async function facilitatorAction(code, body, now) {
   const m = st.meta, a = body.action, cmds = [];
   const elapsed = () => (m.segAccum || 0) + (m.running && m.segStartedAt ? now - m.segStartedAt : 0);
   switch (a) {
-    case 'start': Object.assign(m, { launched: true, ended: false, seg: 0, segAccum: 0, segStartedAt: now, running: true, pushedPrompt: null, projMode: 'instructions', projKey: null, priorMs: 0 }); break;
+    case 'start': m.round = (m.round || 0) + 1; Object.assign(m, { launched: true, ended: false, seg: 0, segAccum: 0, segStartedAt: now, running: true, pushedPrompt: null, projMode: 'instructions', projKey: null, priorMs: 0 }); break;
     case 'next': {
+      m.round = (m.round || 0) + 1;
       const done = elapsed();
       m.priorMs = (m.priorMs || 0) + done;
       if (m.seg >= m.agenda.length - 1) Object.assign(m, { ended: true, running: false, segAccum: 0, segStartedAt: null });
@@ -110,7 +114,8 @@ async function facilitatorAction(code, body, now) {
     case 'resume': if (!m.running && m.launched && !m.ended) { m.running = true; m.segStartedAt = now; } break;
     case 'addMin': if (m.agenda[m.seg]) m.agenda[m.seg].mins += 1; break;
     case 'proj': m.projMode = ['join', 'instructions', 'groups', 'off'].includes(body.mode) ? body.mode : 'join'; m.projKey = body.key || null; break;
-    case 'push': m.pushedPrompt = body.text ? clean(body.text, 300) : null; break;
+    case 'push': m.pushedPrompt = body.text ? clean(body.text, 300) : null; if (m.pushedPrompt) m.round = (m.round || 0) + 1; break;
+    case 'resetDone': m.round = (m.round || 0) + 1; break;
     case 'call': m.calledNum = body.n || null; break;
     case 'agenda': {
       const ag = (body.agenda || []).filter(x => x && x.key).map(x => ({ key: clean(x.key, 30), mins: Math.max(1, Math.min(90, Number(x.mins) || 1)) }));
@@ -135,6 +140,7 @@ async function facilitatorAction(code, body, now) {
       const map = body.map || {};
       const flat = []; for (const id in map) if (st.students[id]) flat.push(id, String(Math.max(0, Math.min(n - 1, Number(map[id])))));
       cmds.push(['DEL', K(code, 'g')]); if (flat.length) cmds.push(['HSET', K(code, 'g'), ...flat]);
+      m.round = (m.round || 0) + 1;
       break;
     }
     case 'lock': m.locked = (body.locked || []).map(Boolean); break;
@@ -154,7 +160,8 @@ async function facilitatorAction(code, body, now) {
       const flat = [];
       for (const id in st.students) { const p = st.students[id]; if (!p) continue; p.last = st.groups[id] != null ? st.groups[id] : p.last; if (p.status === 'active') p.status = 'away'; p.late = false; flat.push(id, JSON.stringify(p)); }
       if (flat.length) cmds.push(['HSET', K(code, 's'), ...flat]);
-      cmds.push(['DEL', K(code, 'g')], ['DEL', K(code, 'ans')]);
+      cmds.push(['DEL', K(code, 'g')], ['DEL', K(code, 'ans')], ['DEL', K(code, 'done')]);
+      m.round = (m.round || 0) + 1;
       Object.assign(m, { launched: false, ended: false, seg: 0, segAccum: 0, segStartedAt: null, running: false, priorMs: 0, pushedPrompt: null, projMode: 'join', projKey: null, session: (m.session || 1) + 1 });
       break;
     }
@@ -234,6 +241,13 @@ async function handle(req) {
       const sid = clean(b.sid, 40); const a = {};
       for (const k in (b.answers || {})) a[clean(k, 30)] = clean(b.answers[k], 500);
       await redis([['HSET', K(code, 'ans'), sid, JSON.stringify(a)], bump(code)]);
+      return { ok: true };
+    }
+    case 'done': {
+      // "We're done discussing" — tied to the current round, so it resets on Next, a new prompt, or regrouping.
+      const sid = clean(b.sid, 40), round = Number(b.round) || 0;
+      if (!sid) throw Object.assign(new Error('Not in this class'), { status: 400 });
+      await redis([b.done ? ['HSET', K(code, 'done'), sid, String(round)] : ['HDEL', K(code, 'done'), sid]]);
       return { ok: true };
     }
     case 'connect': {

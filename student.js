@@ -159,6 +159,7 @@ function StudentApp({ code, sid, profile, setProfile, lateIntro, onRejoin }) {
   const [toast, showToast] = useToast();
   const lastG = useRef(null), lastSeg = useRef(null);
   const [moved, setMoved] = useState(false);
+  const [doneLocal, setDoneLocal] = useState(null); // optimistic { round, done }
 
   const me = data && data.me;
   const meta = data && data.meta;
@@ -185,6 +186,15 @@ function StudentApp({ code, sid, profile, setProfile, lateIntro, onRejoin }) {
   const pool = prompts.length ? prompts : ((meta.prompts && meta.prompts.frequency) || info('frequency').prompts);
   const segLeftLabel = !meta.launched ? 'starting soon' : meta.ended ? 'class has ended' : T.segLeft >= 0 ? fmt(T.segLeft) + ' left' : 'wrapping up';
   const isGame = !!GAMES.find(x => x.key === segItem.key);
+  const round = meta.round || 0;
+  const isDone = doneLocal && doneLocal.round === round ? doneLocal.done : me.doneRound === round;
+  const canDone = meta.launched && !meta.ended && segItem.key !== 'welcome' && segItem.key !== 'wrap';
+  const toggleDone = async () => {
+    const nd = !isDone; setDoneLocal({ round, done: nd });
+    try { await post({ op: 'done', code, sid, round, done: nd }); if (nd) showToast('Your teacher can see you’re done'); }
+    catch (e) { setDoneLocal({ round, done: !nd }); showToast(e.message); }
+  };
+  const doneBtn = canDone && html`<${DoneButton} done=${isDone} onClick=${toggleDone} />`;
   const showWrap = meta.ended || segItem.key === 'wrap';
 
   const saveProfile = async (patch) => {
@@ -225,13 +235,14 @@ function StudentApp({ code, sid, profile, setProfile, lateIntro, onRejoin }) {
           ${meta.launched && isGame && html`<button class="btn-sm" style="margin-top:16px;background:#fff;color:var(--cd);border-radius:30px" onClick=${() => setSheet('guide')}>How to play</button>`}
         </div>
         ${meta.pushedPrompt && html`<div class="card-white"><div style="font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;opacity:.6">From your instructor</div><div style="font-size:21px;font-weight:800;line-height:1.25;margin-top:8px">${meta.pushedPrompt}</div></div>`}
+        ${doneBtn}
         ${meta.calledNum && segItem.key === 'molecules' && html`<div class="card-white" style="text-align:center"><div style="font-size:12px;font-weight:800;letter-spacing:1px;text-transform:uppercase;opacity:.6">Make a group of</div><div style="font-size:72px;font-weight:900;line-height:1">${meta.calledNum}</div></div>`}
         ${(!meta.launched || segItem.key === 'welcome') && html`<${IntroQuestions} code=${code} sid=${sid} meta=${meta} me=${me} anon=${profile.anon} onAnon=${() => saveProfile({ anon: !profile.anon })} toast=${showToast} refresh=${refresh} />`}
         ${meta.launched && segItem.key === 'truths' && html`<${Truths} />`}
         ${showWrap && html`<${WrapPick} code=${code} sid=${sid} data=${data} me=${me} profile=${profile} toast=${showToast} refresh=${refresh} />`}
         ${meta.launched && !meta.ended && html`<div style="display:flex;align-items:center;gap:12px;padding:4px 4px 0;color:rgba(255,255,255,.7);font-size:13.5px"><span style="font-weight:700">Up next</span><span style="flex:1;height:1px;background:rgba(255,255,255,.22)"></span><span>${T.next ? T.next.name : 'You’re all set'}</span></div>`}
       </div>`}
-      ${tab === 'group' && html`<${GroupTab} C=${C} g=${g} mates=${mates} pool=${pool} />`}
+      ${tab === 'group' && html`<${GroupTab} C=${C} g=${g} mates=${mates} pool=${pool} doneBtn=${doneBtn} />`}
       ${tab === 'connect' && html`<${ConnectTab} code=${code} sid=${sid} data=${data} me=${me} profile=${profile} saveProfile=${saveProfile} toast=${showToast} refresh=${refresh} />`}
     </div>
 
@@ -334,7 +345,13 @@ function WrapPick({ code, sid, data, me, profile, toast, refresh }) {
   </div>`;
 }
 
-function GroupTab({ C, mates, pool }) {
+function DoneButton({ done, onClick }) {
+  return html`<button onClick=${onClick} aria-pressed=${done} style=${{ width: '100%', minHeight: '60px', borderRadius: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', fontSize: '17px', fontWeight: 800, background: done ? 'rgba(84,214,141,.22)' : 'rgba(255,255,255,.95)', color: done ? '#fff' : 'var(--cd)', border: done ? '1.5px solid rgba(84,214,141,.6)' : '1.5px solid transparent' }}>
+    ${done ? html`<span>✓ Done — teacher notified</span><span style="font-size:13px;font-weight:700;opacity:.75">· Undo</span>` : html`<span>We're done discussing</span>`}
+  </button>`;
+}
+
+function GroupTab({ C, mates, pool, doneBtn }) {
   const [open, setOpen] = useState(false);
   const [i, setI] = useState(0);
   return html`<div style="min-height:100%;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;padding:24px 30px 110px">
@@ -347,7 +364,8 @@ function GroupTab({ C, mates, pool }) {
         <div style="display:flex;align-items:center;justify-content:space-between"><span style="font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase;opacity:.55">Talk about this</span><button onClick=${() => setOpen(false)} aria-label="Close" style="width:44px;height:44px;margin:-12px -12px -12px 0;font-size:20px;color:rgba(0,0,0,.4)">×</button></div>
         <div style="font-size:21px;font-weight:800;line-height:1.25;margin-top:6px">${pool[i % pool.length]}</div>
         <button onClick=${() => setI(i + 1)} style="margin-top:10px;min-height:44px;font-size:14px;font-weight:800;text-decoration:underline">New prompt →</button>
-      </div></div>`}
+      </div>${doneBtn && html`<div style="margin-top:10px">${doneBtn}</div>`}</div>`}
+    ${!open && doneBtn && html`<div style="width:100%;max-width:360px">${doneBtn}</div>`}
   </div>`;
 }
 

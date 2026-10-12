@@ -24,12 +24,12 @@ export function Screen({ code }) {
           <div style=${{ fontSize: u(2.2), fontWeight: 700, color: 'rgba(255,255,255,.6)', marginTop: u(3) }}>${meta.name}</div>
           <div style=${{ fontSize: u(5.4), fontWeight: 900, letterSpacing: '-.02em', lineHeight: 1.02, marginTop: u(1) }}>Join on your phone</div>
           <div style=${{ fontSize: u(2), color: 'rgba(255,255,255,.65)', marginTop: u(2.5) }}>Scan the code, or go to</div>
-          <div style=${{ fontSize: u(2.4), fontWeight: 800, marginTop: u(.5), wordBreak: 'break-all' }}>${prettyLink(code)}</div>
+          <div style=${{ fontSize: u(2.4), fontWeight: 800, marginTop: u(.5), wordBreak: 'break-all' }}>${prettyLink(code, data.base)}</div>
           <div style=${{ fontSize: u(2), color: 'rgba(255,255,255,.65)', marginTop: u(3) }}>Class code</div>
           <div class="mono" style=${{ fontSize: u(9), letterSpacing: '.12em', lineHeight: 1 }}>${code}</div>
           <div style=${{ display: 'flex', alignItems: 'baseline', gap: u(1.2), marginTop: u(3.5) }}><span style=${{ fontSize: u(5), fontWeight: 900 }}>${data.roster.length}</span><span style=${{ fontSize: u(2), color: 'rgba(255,255,255,.6)' }}>${meta.expected ? 'of ' + meta.expected + ' joined' : 'joined'}</span></div>
         </div>
-        <div style=${{ background: '#fff', borderRadius: u(2.4), padding: u(1.6), flexShrink: 0 }}><${QR} text=${joinUrl(code)} size=${Math.round(Math.min(window.innerWidth * 0.34, window.innerHeight * 0.62))} /></div>
+        <div style=${{ background: '#fff', borderRadius: u(2.4), padding: u(1.6), flexShrink: 0 }}><${QR} text=${joinUrl(code, data.base)} size=${Math.round(Math.min(window.innerWidth * 0.34, window.innerHeight * 0.62))} /></div>
       </div>${fsBtn}</div>`;
   }
 
@@ -59,6 +59,6 @@ export function Screen({ code }) {
       ${meta.pushedPrompt && html`<div style=${{ marginTop: u(2), background: '#fff', color: '#101116', borderRadius: u(2), padding: u(2.4), fontSize: u(3), fontWeight: 800, lineHeight: 1.25 }}>${meta.pushedPrompt}</div>`}
       ${meta.calledNum && key === 'molecules' && html`<div style=${{ fontSize: u(8), fontWeight: 900, lineHeight: 1 }}>Groups of ${meta.calledNum}</div>`}
     </div>
-    <div style=${{ display: 'flex', justifyContent: 'space-between', fontSize: u(1.6), color: 'rgba(255,255,255,.45)' }}><span>Joining late? Scan at ${prettyLink(code)} · code <b class="mono">${code}</b></span><span>${T.next && !meta.ended ? 'Up next: ' + T.next.name : ''}</span></div>
+    <div style=${{ display: 'flex', justifyContent: 'space-between', fontSize: u(1.6), color: 'rgba(255,255,255,.45)' }}><span>Joining late? Scan at ${prettyLink(code, data.base)} · code <b class="mono">${code}</b></span><span>${T.next && !meta.ended ? 'Up next: ' + T.next.name : ''}</span></div>
     ${fsBtn}</div>`;
 }

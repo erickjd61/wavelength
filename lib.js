@@ -10,8 +10,11 @@ export const normCode = (c) => String(c || '').toUpperCase().replace(/[^A-Z0-9]/
 export const first = (n) => String(n || '').trim().split(/\s+/)[0];
 export const short = (n) => { const [f, l] = String(n || '').trim().split(/\s+/); return l ? f + ' ' + l[0] + '.' : (f || ''); };
 export const fmt = (sec) => { const a = Math.abs(Math.round(sec)); return (sec < 0 ? '+' : '') + Math.floor(a / 60) + ':' + String(a % 60).padStart(2, '0'); };
-export const joinUrl = (code) => location.origin + '/?c=' + code;
-export const prettyLink = (code) => location.host + '/?c=' + code;
+// The public address students should use. The server supplies the production domain, so the
+// QR code stays public even when the facilitator opened a private Vercel deployment link.
+const baseOf = (base) => (base || location.origin).replace(/\/$/, '');
+export const joinUrl = (code, base) => baseOf(base) + '/?c=' + code;
+export const prettyLink = (code, base) => baseOf(base).replace(/^https?:\/\//, '') + '/?c=' + code;
 
 export async function post(body) {
   const r = await fetch('/api/rpc', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

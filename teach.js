@@ -137,13 +137,13 @@ function drift(data, meta, active) {
 }
 
 function RunPre({ data, meta, T, act, code, active, setView, openScreen }) {
-  const link = joinUrl(code);
+  const link = joinUrl(code, data.base);
   return html`<div class="grid2">
     <div class="panel" style="padding:24px;display:flex;flex-direction:column;gap:18px">
       <div><div class="k">Before class</div><div style="font-size:30px;font-weight:900;letter-spacing:-.6px;margin-top:4px">Get everyone in</div></div>
       <div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap">
         <${QR} text=${link} size=${150} />
-        <div style="min-width:0"><div class="k">Class code</div><div class="mono" style="font-size:44px;letter-spacing:4px;margin-top:4px">${code}</div><div style="font-size:13.5px;color:rgba(255,255,255,.6);word-break:break-all">${prettyLink(code)}</div></div>
+        <div style="min-width:0"><div class="k">Class code</div><div class="mono" style="font-size:44px;letter-spacing:4px;margin-top:4px">${code}</div><div style="font-size:13.5px;color:rgba(255,255,255,.6);word-break:break-all">${prettyLink(code, data.base)}</div></div>
       </div>
       <div><div style="display:flex;align-items:baseline;gap:10px"><span style="font-size:46px;font-weight:900;line-height:1">${active.length}</span><span style="font-size:16px;color:rgba(255,255,255,.6)">${meta.expected ? 'of ' + meta.expected + ' joined' : 'joined'}</span></div>
         <div class="bar" style="margin-top:12px;height:10px"><div style=${{ width: (meta.expected ? Math.min(100, active.length / meta.expected * 100) : (active.length ? 100 : 0)) + '%', background: '#54d68d', transition: 'width .6s' }}></div></div></div>
@@ -172,6 +172,20 @@ function PushPrompts({ meta, T, act }) {
     <div style="display:flex;flex-wrap:wrap;gap:8px">${list.map(t => { const on = meta.pushedPrompt === t; return html`<button onClick=${() => act('push', { text: on ? '' : t }, on ? 'Prompt cleared' : 'Prompt sent to every phone')} style=${{ minHeight: '44px', maxWidth: '100%', textAlign: 'left', background: on ? 'rgba(46,107,255,.2)' : 'rgba(255,255,255,.05)', border: '1px solid ' + (on ? 'rgba(111,155,255,.6)' : 'rgba(255,255,255,.1)'), borderRadius: '12px', padding: '8px 12px', display: 'flex', alignItems: 'center', gap: '10px' }}><span style="font-size:14px;font-weight:600">${t}</span><span style=${{ fontSize: '11px', fontWeight: 800, color: on ? '#8fb0ff' : 'rgba(255,255,255,.5)' }}>${on ? 'LIVE · tap to clear' : 'Push'}</span></button>`; })}</div>
     <form style="display:flex;gap:8px;margin-top:10px" onSubmit=${e => { e.preventDefault(); if (custom.trim()) { act('push', { text: custom.trim() }, 'Prompt sent to every phone'); setCustom(''); } }}>
       <input class="field" style="padding:11px 13px;font-size:14px" value=${custom} onInput=${e => setCustom(e.target.value)} placeholder="Or type your own prompt…" maxlength="300" /><button class="gbtn" type="submit">Send</button></form>
+  </div>`;
+}
+
+function DonePanel({ data, meta, active, act }) {
+  const doneSet = new Set(data.doneIds || []);
+  const people = active.filter(p => !p.nophone);
+  const n = meta.groupCount || 5, rows = Array.from({ length: n }, () => ({ total: 0, done: 0 }));
+  people.forEach(p => { const g = data.groups[p.id]; if (g != null && rows[g]) { rows[g].total++; if (doneSet.has(p.id)) rows[g].done++; } });
+  const doneN = people.filter(p => doneSet.has(p.id)).length;
+  return html`<div class="panel">
+    <div style="display:flex;justify-content:space-between;align-items:baseline"><span class="k">Done discussing</span><span style="font-size:22px;font-weight:900">${doneN}<span style="font-size:14px;color:rgba(255,255,255,.55);font-weight:700"> of ${people.length}</span></span></div>
+    <div class="bar" style="margin-top:10px"><div style=${{ width: (people.length ? doneN / people.length * 100 : 0) + '%', background: '#54d68d', transition: 'width .4s' }}></div></div>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-top:12px">${rows.map((r, g) => { const k = G(g), all = r.total > 0 && r.done === r.total; return html`<div style="display:flex;align-items:center;gap:10px;font-size:13.5px"><span style=${{ width: '18px', color: k.base }}>${k.sym}</span><span style="flex:1;font-weight:700">${gLabel(g)}</span><span style=${{ fontWeight: 800, color: all ? '#54d68d' : 'rgba(255,255,255,.75)' }}>${all ? '✓ All done' : r.done + ' / ' + r.total}</span></div>`; })}</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px"><span style="font-size:12px;color:rgba(255,255,255,.5);line-height:1.4">Students tap “We're done” on their phones. Resets on Next, a new prompt, or regrouping.</span><button class="gbtn" style="min-height:36px;font-size:12.5px;flex-shrink:0" onClick=${() => act('resetDone', {}, 'Done marks cleared')}>Reset</button></div>
   </div>`;
 }
 
@@ -209,6 +223,7 @@ function RunLive({ data, meta, T, act, active, online, setView, setGuide, openSc
         ${!meta.ended && html`<${PushPrompts} meta=${meta} T=${T} act=${act} />`}
       </div>
       <div class="col">
+        ${!meta.ended && T.item.key !== 'welcome' && T.item.key !== 'wrap' && html`<${DonePanel} data=${data} meta=${meta} active=${active} act=${act} />`}
         <div class="panel"><div style="display:flex;justify-content:space-between;align-items:baseline"><span class="k">Class progress</span><span style="font-size:22px;font-weight:900">${meta.ended ? 100 : Math.round(T.segIdx / meta.agenda.length * 100)}%</span></div>
           <div class="bar" style="margin-top:10px"><div style=${{ width: (meta.ended ? 100 : T.segIdx / meta.agenda.length * 100) + '%', background: '#6f9bff' }}></div></div>
           <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:13px;color:rgba(255,255,255,.6)"><span>${active.length - offline.length} of ${active.length} phones connected</span><button onClick=${() => setView('insights')} style="font-weight:800;color:#8fb0ff">Per student →</button></div></div>
