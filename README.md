@@ -6,7 +6,7 @@ Live classroom icebreakers, based on Noah O'Donnell's Wavelength design. Student
 
 | Who | Address | What it does |
 |---|---|---|
-| Students | `/` or `/?c=CODE` (the QR code) | Join with the class code, get a color group, follow each activity, answer the teacher's questions, save who they met |
+| Students | `/` or `/CODE`, e.g. `/BIO101` (the QR code) | Join with the class code, get a color group, follow each activity, answer the teacher's questions, save who they met |
 | Facilitator | `/teach` | Create a class (code + PIN), run the agenda and timer, push prompts, regroup, see answers and progress, export the roster |
 | Projector | `/screen?c=CODE` | Join screen with QR, activity instructions with timer, groups by name, or blank. Controlled from `/teach` |
 

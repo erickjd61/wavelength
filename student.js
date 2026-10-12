@@ -20,7 +20,7 @@ export function Student({ initialCode }) {
       const { exists } = await post({ op: 'check', code: c });
       if (!exists) { setErr('No class with that code. Check the screen at the front of the room.'); setScreen('code'); return; }
       setCode(c);
-      try { history.replaceState(null, '', '/?c=' + c); } catch (_) {}
+      try { history.replaceState(null, '', '/' + c); } catch (_) {}
       const known = ls.get('wl:sid:' + c, null);
       if (known && profile.name) { setSid(known); setScreen('returning'); } else setScreen('profile');
     } catch (e) { setErr(e.message); setScreen('code'); }

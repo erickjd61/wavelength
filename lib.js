@@ -13,8 +13,8 @@ export const fmt = (sec) => { const a = Math.abs(Math.round(sec)); return (sec <
 // The public address students should use. The server supplies the production domain, so the
 // QR code stays public even when the facilitator opened a private Vercel deployment link.
 const baseOf = (base) => (base || location.origin).replace(/\/$/, '');
-export const joinUrl = (code, base) => baseOf(base) + '/?c=' + code;
-export const prettyLink = (code, base) => baseOf(base).replace(/^https?:\/\//, '') + '/?c=' + code;
+export const joinUrl = (code, base) => baseOf(base) + '/' + code;
+export const prettyLink = (code, base) => baseOf(base).replace(/^https?:\/\//, '') + '/' + code;
 
 export async function post(body) {
   const r = await fetch('/api/rpc', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

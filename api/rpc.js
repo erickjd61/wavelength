@@ -199,6 +199,8 @@ async function handle(req) {
     case 'check': { const ex = (await redis([['EXISTS', K(code, 'meta')]]))[0]; return { exists: !!ex }; }
     case 'create': {
       const pin = String(b.pin || '');
+      if (['TEACH', 'SCREEN', 'API', 'INDEX'].includes(code)) throw Object.assign(new Error('That code is reserved. Pick another.'), { status: 400 });
+      if (code.length < 3) throw Object.assign(new Error('Use a code of at least 3 letters or numbers.'), { status: 400 });
       if (pin.length < 4) throw Object.assign(new Error('PIN must be at least 4 characters'), { status: 400 });
       const ex = jparse((await redis([['GET', K(code, 'meta')]]))[0], null);
       if (ex) { if (ex.pinHash !== hash(pin)) throw Object.assign(new Error('That code is taken. Pick another, or enter its PIN.'), { status: 409 }); return { ok: true, resumed: true }; }

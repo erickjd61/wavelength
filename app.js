@@ -6,7 +6,8 @@ import { Screen } from './screen.js';
 
 const path = location.pathname.replace(/\/+$/, '');
 const params = new URLSearchParams(location.search);
-const pathCode = (path.match(/^\/j\/([A-Za-z0-9]+)/) || [])[1];
+// Short class links: /BIO101 (also /j/BIO101 and /?c=BIO101 for older links).
+const pathCode = (path.match(/^\/j\/([A-Za-z0-9]+)/) || [])[1] || (path !== '/teach' && path !== '/screen' ? (path.match(/^\/([A-Za-z0-9]{3,8})$/) || [])[1] : null);
 const code = normCode(params.get('c') || pathCode || '');
 
 let view;
