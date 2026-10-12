@@ -1,0 +1,7 @@
+{
+  "name": "wavelength",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Live classroom icebreakers — students join from their phones, the facilitator runs the session, the projector shows the room.",
+  "engines": { "node": ">=20" }
+}
