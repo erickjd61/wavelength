@@ -1,6 +1,6 @@
 import { html } from './vendor/preact-htm.js';
 import { G, gLabel, info } from './content.js';
-import { short, fmt, usePoll, useTick, timing, QR, Dots, joinUrl, prettyLink } from './lib.js';
+import { short, fmt, usePoll, useTick, timing, QR, Dots, joinUrl, prettyLink, Shape } from './lib.js';
 
 export function Screen({ code }) {
   const { data, error, offset } = usePoll({ code, role: 'screen', interval: 2500, enabled: !!code });
@@ -34,14 +34,23 @@ export function Screen({ code }) {
   }
 
   if (mode === 'groups') {
-    const n = meta.groupCount || 5, cols = Array.from({ length: n }, () => []);
+    const n = meta.groupCount || 1, cols = Array.from({ length: n }, () => []);
     data.roster.forEach(p => { if (p.g != null && cols[p.g]) cols[p.g].push(p); });
+    // Wrap into rows for big classes and shrink text so every name still fits on one screen.
+    const perRow = n <= 6 ? n : n <= 12 ? 6 : n <= 24 ? 8 : 9, rows = Math.ceil(n / perRow);
+    const most = Math.max(1, ...cols.map(c => c.length));
+    // Size text to fit both the card height (most members) and the column width (longest label/name).
+    const pad = rows > 2 ? 0.9 : 1.6, inner = (94 - (perRow - 1) * (rows > 2 ? 0.9 : 1.4)) / perRow - pad * 2;
+    const longName = Math.max(4, ...data.roster.map(p => short(p.name).length));
+    const longHead = Math.max(...cols.map((_, g) => (G(g).name + (G(g).num > 1 ? ' ' + G(g).num : '')).length));
+    const nameFs = Math.max(0.8, Math.min(1.85, 44 / rows / (most + 2.6) / 1.45, inner / (0.56 * longName)));
+    const headFs = Math.max(1.1, Math.min(2.4, 6.5 / Math.sqrt(rows), (inner - 0.8) / (1 + 0.62 * longHead)));
     return html`<div class="screen" style=${{ padding: u(3), display: 'flex', flexDirection: 'column', gap: u(2) }}>
-      <div style=${{ display: 'flex', alignItems: 'baseline', gap: u(2) }}><div style=${{ fontSize: u(4), fontWeight: 900 }}>Find your group</div><div style=${{ fontSize: u(1.8), color: 'rgba(255,255,255,.55)' }}>${data.roster.length} students</div></div>
-      <div style=${{ flex: 1, display: 'grid', gridTemplateColumns: `repeat(${n}, minmax(0,1fr))`, gap: u(1.4), minHeight: 0 }}>${cols.map((ms, g) => { const k = G(g); return html`<div style=${{ background: k.base + '1f', border: '2px solid ' + k.base + '88', borderRadius: u(1.6), padding: u(1.6), overflow: 'hidden' }}>
-        <div style=${{ display: 'flex', alignItems: 'center', gap: u(1), fontSize: u(2.4), fontWeight: 900, color: k.soft }}><span>${k.sym}</span>${k.name}</div>
-        <div style=${{ fontSize: u(1.3), color: 'rgba(255,255,255,.55)', marginBottom: u(1) }}>${k.shape} · ${ms.length}</div>
-        ${ms.slice().sort((a, b) => a.name.localeCompare(b.name)).map(p => html`<div style=${{ fontSize: u(ms.length > 9 ? 1.5 : 1.85), fontWeight: 700, padding: u(.35) + ' 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${short(p.name)}${p.nophone ? html`<span style="opacity:.55"> · no phone</span>` : ''}</div>`)}
+      <div style=${{ display: 'flex', alignItems: 'baseline', gap: u(2) }}><div style=${{ fontSize: u(4), fontWeight: 900 }}>Find your group</div><div style=${{ fontSize: u(1.8), color: 'rgba(255,255,255,.55)' }}>${data.roster.length} students · ${n} groups</div></div>
+      <div style=${{ flex: 1, display: 'grid', gridTemplateColumns: `repeat(${perRow}, minmax(0,1fr))`, gridAutoRows: 'minmax(0,1fr)', gap: u(rows > 2 ? 0.9 : 1.4), minHeight: 0 }}>${cols.map((ms, g) => { const k = G(g); return html`<div style=${{ background: k.base + '1f', border: '2px solid ' + k.base + '88', borderRadius: u(1.4), padding: u(rows > 2 ? 0.9 : 1.6), overflow: 'hidden', minHeight: 0 }}>
+        <div style=${{ display: 'flex', alignItems: 'center', gap: u(0.8), fontSize: u(headFs), fontWeight: 900, color: k.soft, whiteSpace: 'nowrap', overflow: 'hidden' }}><${Shape} g=${g} size=${Math.round(headFs * 9)} />${k.name}${k.num > 1 ? ' ' + k.num : ''}</div>
+        <div style=${{ fontSize: u(Math.max(0.9, headFs * 0.55)), color: 'rgba(255,255,255,.55)', marginBottom: u(0.6), whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${k.shapeLabel} · ${ms.length}</div>
+        ${ms.slice().sort((a, b) => a.name.localeCompare(b.name)).map(p => html`<div style=${{ fontSize: u(nameFs), fontWeight: 700, padding: u(nameFs * 0.18) + ' 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${short(p.name)}</div>`)}
       </div>`; })}</div>${fsBtn}</div>`;
   }
 

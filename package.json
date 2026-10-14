@@ -2,6 +2,12 @@
   "name": "wavelength",
   "version": "1.0.0",
   "private": true,
-  "description": "Live classroom icebreakers — students join from their phones, the facilitator runs the session, the projector shows the room.",
-  "engines": { "node": ">=20" }
+  "description": "Live classroom icebreakers \u2014 students join from their phones, the facilitator runs the session, the projector shows the room.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test tests/server.test.js",
+    "dev": "node scripts/dev.js"
+  }
 }

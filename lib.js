@@ -19,12 +19,12 @@ export const prettyLink = (code, base) => baseOf(base).replace(/^https?:\/\//, '
 export async function post(body) {
   const r = await fetch('/api/rpc', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   let j = {}; try { j = await r.json(); } catch (_) {}
-  if (!r.ok) throw new Error(j.error || 'Something went wrong (' + r.status + ')');
+  if (!r.ok) throw Object.assign(new Error(j.error || 'Something went wrong (' + r.status + ')'), { status: r.status, code: j.code });
   return j;
 }
 
 // Polls the class state. Cheap when nothing changed (server answers "same").
-export function usePoll({ code, role, sid, pin, interval = 2500, enabled = true }) {
+export function usePoll({ code, role, sid, pin, skey, interval = 2500, enabled = true }) {
   const [state, setState] = useState({ data: null, error: null, offline: false, offset: 0 });
   const ref = useRef({ v: null, data: null, fails: 0, n: 0, kick: null });
   useEffect(() => {
@@ -40,16 +40,17 @@ export function usePoll({ code, role, sid, pin, interval = 2500, enabled = true 
       r0.n++;
       try {
         const t0 = Date.now();
-        const r = await fetch('/api/rpc?' + q, { headers: pin ? { 'x-wl-pin': pin } : {}, cache: 'no-store' });
+        const headers = {}; if (pin) headers['x-wl-pin'] = pin; if (skey) headers['x-wl-key'] = skey;
+        const r = await fetch('/api/rpc?' + q, { headers, cache: 'no-store' });
         const j = await r.json().catch(() => ({}));
-        if (!r.ok) throw Object.assign(new Error(j.error || 'Error ' + r.status), { status: r.status });
+        if (!r.ok) throw Object.assign(new Error(j.error || 'Error ' + r.status), { status: r.status, code: j.code });
         const offset = j.now - Math.round((t0 + Date.now()) / 2);
         r0.fails = 0;
         if (!j.same) { r0.v = j.v; r0.data = j; }
         if (!stop) setState({ data: r0.data, error: null, offline: false, offset });
       } catch (e) {
         r0.fails++;
-        if (!stop) setState(s => ({ ...s, error: e.status ? e.message : s.error, status: e.status, offline: !e.status && r0.fails >= 2 }));
+        if (!stop) setState(s => ({ ...s, error: e.status ? e.message : s.error, status: e.status, errCode: e.code, offline: !e.status && r0.fails >= 2 }));
       }
       if (!stop) timer = setTimeout(tick, document.hidden ? Math.max(interval, 8000) : r0.fails ? Math.min(10000, interval * (1 + r0.fails)) : interval);
     };
@@ -58,7 +59,7 @@ export function usePoll({ code, role, sid, pin, interval = 2500, enabled = true 
     document.addEventListener('visibilitychange', onVis);
     tick();
     return () => { stop = true; clearTimeout(timer); document.removeEventListener('visibilitychange', onVis); };
-  }, [code, role, sid, pin, enabled]);
+  }, [code, role, sid, pin, skey, enabled]);
   return { ...state, refresh: () => ref.current.kick && ref.current.kick() };
 }
 
@@ -103,6 +104,17 @@ export function assignGroups(list, count, locked, prev, avoid, seed) {
   });
   return res;
 }
+// Groups: either a fixed number of groups, or a target size (the number follows from who is here).
+export const MAX_GROUPS = 36;
+export function planCount(n, mode, size, count) {
+  if (mode === 'size') return Math.max(1, Math.min(MAX_GROUPS, Math.round(n / Math.max(2, size || 4)) || 1));
+  return Math.max(1, Math.min(MAX_GROUPS, count || 1));
+}
+export function sizeRange(n, c) {
+  if (!n || !c) return '';
+  const lo = Math.floor(n / c), hi = Math.ceil(n / c);
+  return lo === hi ? lo + ' per group' : lo + '\u2013' + hi + ' per group';
+}
 export function pairStats(map, list) {
   const by = {}; list.forEach(s => { const g = map[s.id]; if (g == null) return; (by[g] = by[g] || []).push(s); });
   let fresh = 0, rep = 0;
@@ -133,6 +145,11 @@ export function useToast() {
   const [t, set] = useState(null); const r = useRef(null);
   const show = (m) => { set(m); clearTimeout(r.current); r.current = setTimeout(() => set(null), 3000); };
   return [t ? html`<div class="toast" role="status">${t}</div>` : null, show];
+}
+// A group's shape, drawn as SVG in the current text colour (or `color`).
+export function Shape({ g, size = 18, color, style }) {
+  const k = G(g);
+  return html`<svg viewBox="0 0 24 24" width=${size} height=${size} aria-hidden="true" style=${{ display: 'inline-block', verticalAlign: '-0.15em', flexShrink: 0, ...(style || {}) }}><path d=${k.d} fill=${color || 'currentColor'} /></svg>`;
 }
 export function colorVars(g) { const k = G(g); return { '--c': k.base, '--cd': k.deep, '--cs': k.soft }; }
 

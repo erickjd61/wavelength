@@ -26,6 +26,10 @@ a{color:#8fb0ff}::selection{background:#2e6bff55}
 .btn-sm{min-height:44px;border-radius:12px;font-size:14px;font-weight:800;padding:0 14px;display:inline-flex;align-items:center;justify-content:center;gap:8px}
 .field{width:100%;padding:15px 16px;border-radius:14px;background:rgba(255,255,255,.07);border:1.5px solid rgba(255,255,255,.16);color:#fff;font-size:16px;outline:none}
 .field:focus{border-color:rgba(255,255,255,.45)}
+/* Example text in empty fields: clearly dimmer and italic, so it never reads as a real value. */
+.field::placeholder{color:rgba(255,255,255,.32);font-style:italic;font-weight:400;letter-spacing:normal;text-transform:none;opacity:1}
+.card-white .field::placeholder{color:rgba(16,17,22,.38)}
+.live-tag{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:#54d68d}.live-tag::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor;animation:wl-livedot 1.4s infinite}
 textarea.field{resize:vertical;line-height:1.45}
 .label-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;font-size:14px;font-weight:800}
 .chip{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;padding:5px 10px;border-radius:20px;white-space:nowrap}

@@ -1,14 +1,26 @@
 // Activity content, carried over from Noah's Wavelength design.
-export const ORDER = ['teal', 'purple', 'coral', 'blue', 'gold'];
-export const COLORS = {
-  teal:   { name: 'Teal',   shape: 'Triangle', sym: '▲', base: '#06b6a4', deep: '#022f2b', soft: '#7fe6da' },
-  purple: { name: 'Purple', shape: 'Diamond',  sym: '◆', base: '#7a4dff', deep: '#1b0a55', soft: '#c4acff' },
-  coral:  { name: 'Coral',  shape: 'Circle',   sym: '●', base: '#ff6b5e', deep: '#5a150e', soft: '#ffb3aa' },
-  blue:   { name: 'Blue',   shape: 'Square',   sym: '■', base: '#2e6bff', deep: '#081a4d', soft: '#9fb9ff' },
-  gold:   { name: 'Gold',   shape: 'Star',     sym: '★', base: '#f5a300', deep: '#4d3300', soft: '#ffd37a' },
+// Group identities: 12 colour + shape pairs. Beyond 12 groups (large lectures) they repeat with a number,
+// e.g. "Teal Triangle 2". Shapes are SVG paths (24x24) so they look the same on every phone.
+export const PALETTE = [
+  { key: 'teal',   name: 'Teal',   shape: 'Triangle', base: '#06b6a4', deep: '#022f2b', soft: '#7fe6da', d: 'M12 3 22 20.5H2Z' },
+  { key: 'purple', name: 'Purple', shape: 'Diamond',  base: '#7a4dff', deep: '#1b0a55', soft: '#c4acff', d: 'M12 1.5 22.5 12 12 22.5 1.5 12Z' },
+  { key: 'coral',  name: 'Coral',  shape: 'Circle',   base: '#ff6b5e', deep: '#5a150e', soft: '#ffb3aa', d: 'M12 2.5a9.5 9.5 0 1 1 0 19 9.5 9.5 0 0 1 0-19Z' },
+  { key: 'blue',   name: 'Blue',   shape: 'Square',   base: '#2e6bff', deep: '#081a4d', soft: '#9fb9ff', d: 'M3.5 3.5h17v17h-17Z' },
+  { key: 'gold',   name: 'Gold',   shape: 'Star',     base: '#f5a300', deep: '#4d3300', soft: '#ffd37a', d: 'M12 1.8l3.1 6.6 7.2.8-5.4 4.9 1.5 7.1L12 17.6l-6.4 3.6 1.5-7.1L1.7 9.2l7.2-.8Z' },
+  { key: 'pink',   name: 'Pink',   shape: 'Heart',    base: '#e8459e', deep: '#4f0a2e', soft: '#f7a8d2', d: 'M12 21.2S2.8 15.4 2.8 9.1C2.8 6 5.2 3.6 8.1 3.6c1.7 0 3.1.8 3.9 2.1.8-1.3 2.2-2.1 3.9-2.1 2.9 0 5.3 2.4 5.3 5.5 0 6.3-9.2 12.1-9.2 12.1Z' },
+  { key: 'green',  name: 'Green',  shape: 'Hexagon',  base: '#22b350', deep: '#06381a', soft: '#8fe6a9', d: 'M12 1.8l8.8 5.1v10.2L12 22.2l-8.8-5.1V6.9Z' },
+  { key: 'sky',    name: 'Sky',    shape: 'Moon',     base: '#1fb3ec', deep: '#04334a', soft: '#96dcf7', d: 'M14.5 2.2A10 10 0 1 0 21.8 15 8 8 0 0 1 14.5 2.2Z' },
+  { key: 'lime',   name: 'Lime',   shape: 'Bolt',     base: '#94c72a', deep: '#2b3d05', soft: '#d0ec93', d: 'M13.8 1.5 3.8 13.6h6.8L9 22.5 20.2 9.8h-6.9Z' },
+  { key: 'red',    name: 'Red',    shape: 'Plus',     base: '#e5323d', deep: '#4a0a0f', soft: '#f4a0a6', d: 'M8.8 2.5h6.4v6.3h6.3v6.4h-6.3v6.3H8.8v-6.3H2.5V8.8h6.3Z' },
+  { key: 'silver', name: 'Silver', shape: 'Pentagon', base: '#8f9bb3', deep: '#1f2533', soft: '#d2d8e4', d: 'M12 2l10 7.3-3.8 11.7H5.8L2 9.3Z' },
+  { key: 'bronze', name: 'Bronze', shape: 'Drop',     base: '#c07a3a', deep: '#3d220c', soft: '#e8c19c', d: 'M12 2s-7 7.9-7 12.6a7 7 0 0 0 14 0C19 9.9 12 2 12 2Z' },
+];
+export const G = (g) => {
+  const i = Math.max(0, Number(g) || 0), c = PALETTE[i % PALETTE.length], num = Math.floor(i / PALETTE.length) + 1;
+  const shape = c.shape + (num > 1 ? ' ' + num : '');
+  return { ...c, num, shapeLabel: shape, label: c.name + ' ' + shape };
 };
-export const G = (g) => COLORS[ORDER[g] || 'blue'];
-export const gLabel = (g) => { const k = G(g); return k.name + ' ' + k.shape; };
+export const gLabel = (g) => G(g).label;
 
 export const GAMES = [
   { key: 'frequency', name: 'Frequency', color: '#06b6a4', tagline: 'Find your color group', size: '5–6 people', time: '5–15 min', setting: 'Open room',
@@ -68,12 +80,12 @@ export const SEGS = {
     proj: ['Scan the code or open the link', 'Type your name — see your group', 'Say hi to someone near you'],
     say: 'Phones out for a sec. Scan the code on the screen — no app to download. Type your name and your phone will show a color and a shape. Don’t move yet.',
     prompts: [] },
-  wrap: { key: 'wrap', name: 'Wrap-up', color: '#54d68d', tagline: 'Save who you met', size: 'Solo', time: '2–5 min', setting: 'Seats',
-    do: 'Tap the people you met and save them — under a minute.', coach: 'Tap the people you met below and hit Save. That’s it.',
-    why: 'One screen, under a minute, so connections survive past the end of class.',
-    steps: ['Open Wavelength → Now.', 'Tap the people you met.', 'Hit Save.'],
-    proj: ['Open Wavelength → Now', 'Tap the people you met', 'Hit Save — under a minute'],
-    say: 'Before you pack up, open Wavelength and go to Now. Tap the people you met and hit save. It takes under a minute.',
+  wrap: { key: 'wrap', name: 'Wrap-up', color: '#54d68d', tagline: 'Connect with who you met', size: 'Solo', time: '2–5 min', setting: 'Seats',
+    do: 'Send a connection request to anyone you’d like to stay in touch with — under a minute.', coach: 'Tap the people you met below and send requests. You connect when they accept.',
+    why: 'One screen, under a minute, so connections survive past the end of class — and only with people who both agree.',
+    steps: ['Open Wavelength → Now.', 'Tap the people you met.', 'Send requests — you connect when they accept.', 'Accept any requests waiting for you.'],
+    proj: ['Open Wavelength → Now', 'Tap the people you met → send requests', 'Accept requests waiting for you'],
+    say: 'Before you pack up, open Wavelength and go to Now. Tap the people you met and send them a request — you’re connected once they accept. Check for requests waiting for you, too.',
     prompts: ['Who did you meet today that surprised you?'] },
 };
 export const info = (k) => GAMES.find(g => g.key === k) || SEGS[k] || GAMES[0];

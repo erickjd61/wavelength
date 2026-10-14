@@ -1,6 +1,6 @@
 import { html, useState, useEffect, useMemo } from './vendor/preact-htm.js';
 import { G, gLabel, info, GAMES, QUICK } from './content.js';
-import { ls, normCode, first, short, fmt, post, usePoll, useTick, timing, assignGroups, pairStats, QR, Toggle, Dots, useToast, joinUrl, prettyLink, GuideSheet } from './lib.js';
+import { ls, normCode, first, short, fmt, post, usePoll, useTick, timing, assignGroups, pairStats, QR, Toggle, Dots, useToast, joinUrl, prettyLink, GuideSheet, Shape, planCount, sizeRange, MAX_GROUPS } from './lib.js';
 
 const clock = (startMs, offSec) => { if (!startMs) return ''; const d = new Date(startMs + offSec * 1000); return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); };
 
@@ -18,20 +18,42 @@ function Setup({ onReady }) {
   const [expected, setExpected] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const [existing, setExisting] = useState(null);   // summary of a class already using this code
   const gen = () => { const a = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let c = ''; for (let i = 0; i < 6; i++) c += a[Math.floor(Math.random() * a.length)]; setCode(c); };
   const go = async (e) => {
     e && e.preventDefault();
     const c = normCode(code); setErr('');
-    if (c.length < 4) return setErr('Use a code of 4–8 letters or numbers.');
+    if (c.length < 3) return setErr('Use a code of 3–8 letters or numbers.');
     if (pin.length < 4) return setErr('PIN must be at least 4 characters.');
     setBusy(true);
     try {
-      if (mode === 'new') await post({ op: 'create', code: c, pin, name: name || 'My class', expected: Number(expected) || 0 });
-      else await post({ op: 'auth', code: c, pin });
+      if (mode === 'new') {
+        const r = await post({ op: 'create', code: c, pin, name: name || 'My class', expected: Number(expected) || 0 });
+        if (r.exists) { setExisting({ code: c, ...r.summary }); return; }
+      } else await post({ op: 'auth', code: c, pin });
       onReady({ code: c, pin });
     } catch (x) { setErr(x.message); }
     finally { setBusy(false); }
   };
+  const fresh = async () => {
+    if (!confirm('Erase everything in ' + existing.code + ' (students, answers, connections) and start a new class with this code?')) return;
+    setBusy(true);
+    try { await post({ op: 'create', code: existing.code, pin, name: name || 'My class', expected: Number(expected) || 0, fresh: true }); onReady({ code: existing.code, pin }); }
+    catch (x) { setErr(x.message); } finally { setBusy(false); }
+  };
+  if (existing) return html`<div class="dark-bg" style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px 16px">
+    <div style="width:100%;max-width:460px;display:flex;flex-direction:column;gap:16px">
+      <div style="font-size:30px;font-weight:900;letter-spacing:-.8px">${existing.code} already exists</div>
+      <div class="panel" style="display:flex;flex-direction:column;gap:6px;font-size:15px;line-height:1.45">
+        <div><b>${existing.name}</b></div>
+        <div style="color:rgba(255,255,255,.7)">Created ${new Date(existing.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })} · session ${existing.session} · ${existing.students} student${existing.students === 1 ? '' : 's'} on record</div>
+      </div>
+      <div class="sub" style="margin:0">It's yours (the PIN matches). Open it to keep its students and connections, or erase it and start a new class with the same code.</div>
+      ${err && html`<div class="err">${err}</div>`}
+      <button class="btn btn-blue" disabled=${busy} onClick=${() => onReady({ code: existing.code, pin })}>Open the existing class</button>
+      <button class="btn btn-ghost" disabled=${busy} onClick=${fresh}>Erase it and start fresh</button>
+      <button style="min-height:44px;font-size:14px;font-weight:700;color:rgba(255,255,255,.6)" onClick=${() => setExisting(null)}>← Use a different code</button>
+    </div></div>`;
   return html`<div class="dark-bg" style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px 16px">
     <form onSubmit=${go} style="width:100%;max-width:460px;display:flex;flex-direction:column;gap:16px">
       <${Dots} size=${12} />
@@ -41,10 +63,10 @@ function Setup({ onReady }) {
       </div>
       ${mode === 'new' && html`<div><div class="label-row">Class name</div><input class="field" value=${name} onInput=${e => setName(e.target.value)} placeholder="e.g. OLS 274 · Leadership" maxlength="80" /></div>`}
       <div><div class="label-row"><span>Class code <span style="color:rgba(255,255,255,.5);font-weight:600">· students type this</span></span>${mode === 'new' && html`<button type="button" onClick=${gen} style="font-size:13px;font-weight:800;color:#8fb0ff">Generate</button>`}</div>
-        <input class="field mono" value=${code} onInput=${e => setCode(normCode(e.target.value))} placeholder="BIO101" maxlength="8" style="font-size:26px;letter-spacing:4px;text-transform:uppercase" autocapitalize="characters" /></div>
+        <input class="field mono" value=${code} onInput=${e => setCode(normCode(e.target.value))} placeholder="e.g. BIO101" maxlength="8" style="font-size:26px;letter-spacing:4px;text-transform:uppercase" autocapitalize="characters" aria-label="Class code" /></div>
       <div><div class="label-row"><span>Facilitator PIN <span style="color:rgba(255,255,255,.5);font-weight:600">· only you need this</span></span></div>
-        <input class="field" type="password" value=${pin} onInput=${e => setPin(e.target.value)} placeholder="At least 4 characters" autocomplete=${mode === 'new' ? 'new-password' : 'current-password'} /></div>
-      ${mode === 'new' && html`<div><div class="label-row">Expected students <span style="color:rgba(255,255,255,.5);font-weight:600">· optional</span></div><input class="field" type="number" min="0" value=${expected} onInput=${e => setExpected(e.target.value)} placeholder="30" /></div>`}
+        <input class="field" type="password" value=${pin} onInput=${e => setPin(e.target.value)} placeholder="at least 4 characters" aria-label="Facilitator PIN" autocomplete=${mode === 'new' ? 'new-password' : 'current-password'} /></div>
+      ${mode === 'new' && html`<div><div class="label-row"><span>Expected students <span style="color:rgba(255,255,255,.5);font-weight:600">· optional</span></span></div><input class="field" type="number" min="0" inputmode="numeric" value=${expected} onInput=${e => setExpected(e.target.value)} placeholder="e.g. 30 — leave blank if unsure" aria-label="Expected students" /><div style="font-size:12.5px;color:rgba(255,255,255,.5);margin-top:6px">Only used to show “joined of expected” while students arrive.</div></div>`}
       ${err && html`<div class="err">${err}</div>`}
       <button class="btn btn-blue" disabled=${busy} type="submit">${busy ? 'One moment…' : mode === 'new' ? 'Create class' : 'Open class'}</button>
       <div style="font-size:12.5px;color:rgba(255,255,255,.5);line-height:1.5">Use the same code and PIN on your laptop and phone to control the class from both. Keep the PIN private — it's what stops students from changing the session.</div>
@@ -93,7 +115,7 @@ function TeachApp({ code, pin, onSignOut }) {
       <div class="t-nav">
         ${nav.map(([k, l]) => html`<button class=${view === k ? 'on' : ''} onClick=${() => setView(k)}>${l}</button>`)}
         <div style="flex:1"></div>
-        <div class="panel" style="padding:14px"><div class="k">Connections saved</div><div style="font-size:30px;font-weight:900;margin-top:4px">${Math.round(Object.values(data.connCounts).reduce((a, b) => a + b, 0) / 2)}</div><div style="font-size:12.5px;color:rgba(255,255,255,.6)">between students in this class</div></div>
+        <div class="panel" style="padding:14px"><div class="k">Connections made</div><div style="font-size:30px;font-weight:900;margin-top:4px">${(data.connTotals || {}).accepted || 0}</div><div style="font-size:12.5px;color:rgba(255,255,255,.6)">accepted between students${(data.connTotals || {}).pending ? ' · ' + data.connTotals.pending + ' waiting' : ''}</div></div>
       </div>
       <div class="t-main">
         ${view === 'run' && !meta.launched && html`<${RunPre} ...${ctx} openScreen=${openScreen} />`}
@@ -123,14 +145,14 @@ function Timeline({ meta, T }) {
 }
 
 function GroupBars({ data, meta, active }) {
-  const n = meta.groupCount || 5, arr = Array.from({ length: n }, () => []);
+  const n = meta.groupCount || 1, arr = Array.from({ length: n }, () => []);
   active.forEach(p => { const g = data.groups[p.id]; if (g != null && arr[g]) arr[g].push(p); });
   const max = Math.max(1, ...arr.map(a => a.length));
-  return arr.map((ms, g) => { const k = G(g); return html`<div style="display:flex;align-items:center;gap:10px;font-size:14px"><span style=${{ width: '18px', color: k.base }}>${k.sym}</span><span style="width:118px;font-weight:700">${gLabel(g)}</span><span style="flex:1;height:6px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden"><span style=${{ display: 'block', height: '100%', width: (ms.length / max * 100) + '%', background: k.base }}></span></span><span style="width:20px;text-align:right;font-weight:800">${ms.length}</span>${(meta.locked || [])[g] && html`<span style="font-size:11px;color:#f5c26b">🔒</span>`}</div>`; });
+  return arr.map((ms, g) => { const k = G(g); return html`<div style="display:flex;align-items:center;gap:10px;font-size:14px"><span style=${{ width: '18px', color: k.base, display: 'flex' }}><${Shape} g=${g} size=${15} /></span><span style="width:140px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${gLabel(g)}</span><span style="flex:1;height:6px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden"><span style=${{ display: 'block', height: '100%', width: (ms.length / max * 100) + '%', background: k.base }}></span></span><span style="width:20px;text-align:right;font-weight:800">${ms.length}</span>${(meta.locked || [])[g] && html`<span style="font-size:11px;color:#f5c26b">🔒</span>`}</div>`; });
 }
 
 function drift(data, meta, active) {
-  const n = meta.groupCount || 5, sz = Array(n).fill(0);
+  const n = meta.groupCount || 1, sz = Array(n).fill(0);
   active.forEach(p => { const g = data.groups[p.id]; if (g != null && g < n) sz[g]++; });
   const max = Math.max(...sz), min = Math.min(...sz);
   return max - min >= 2 ? gLabel(sz.indexOf(min)) + ' has ' + min + ', ' + gLabel(sz.indexOf(max)) + ' has ' + max + '.' : null;
@@ -145,9 +167,10 @@ function RunPre({ data, meta, T, act, code, active, setView, openScreen }) {
         <${QR} text=${link} size=${150} />
         <div style="min-width:0"><div class="k">Class code</div><div class="mono" style="font-size:44px;letter-spacing:4px;margin-top:4px">${code}</div><div style="font-size:13.5px;color:rgba(255,255,255,.6);word-break:break-all">${prettyLink(code, data.base)}</div></div>
       </div>
-      <div><div style="display:flex;align-items:baseline;gap:10px"><span style="font-size:46px;font-weight:900;line-height:1">${active.length}</span><span style="font-size:16px;color:rgba(255,255,255,.6)">${meta.expected ? 'of ' + meta.expected + ' joined' : 'joined'}</span></div>
+      <div><div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><span style="font-size:46px;font-weight:900;line-height:1">${active.length}</span><span style="font-size:16px;color:rgba(255,255,255,.6)">in the class${active.some(p => p.nophone) ? ' (' + active.filter(p => p.nophone).length + ' without a device)' : ''}</span><span class="live-tag">Live</span></div>
+        <div style="font-size:13px;color:rgba(255,255,255,.5);margin-top:6px">${meta.expected ? 'You expected ' + meta.expected + '.' : 'No expected count set.'}</div>
         <div class="bar" style="margin-top:12px;height:10px"><div style=${{ width: (meta.expected ? Math.min(100, active.length / meta.expected * 100) : (active.length ? 100 : 0)) + '%', background: '#54d68d', transition: 'width .6s' }}></div></div></div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px;max-height:140px;overflow-y:auto">${active.slice().sort((a, b) => b.joinedAt - a.joinedAt).map(p => html`<span style=${{ fontSize: '13px', fontWeight: 700, padding: '6px 10px', borderRadius: '20px', background: G(data.groups[p.id]).base + '33', border: '1px solid ' + G(data.groups[p.id]).base + '66' }}>${G(data.groups[p.id]).sym} ${short(p.name)}</span>`)}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;max-height:140px;overflow-y:auto">${active.slice().sort((a, b) => b.joinedAt - a.joinedAt).map(p => html`<span style=${{ fontSize: '13px', fontWeight: 700, padding: '6px 10px', borderRadius: '20px', background: G(data.groups[p.id]).base + '33', border: '1px solid ' + G(data.groups[p.id]).base + '66' }}>${data.groups[p.id] != null && html`<${Shape} g=${data.groups[p.id]} size=${12} /> `}${short(p.name)}</span>`)}</div>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         <button class="gbtn" style="flex:1;min-height:52px" onClick=${() => { act('proj', { mode: 'join' }); openScreen(); }}>Show join screen on projector</button>
         <button class="gbtn blue" style="flex:1;min-height:52px;font-size:15px" onClick=${() => act('start', {}, 'Class started')}>Start class →</button>
@@ -158,7 +181,7 @@ function RunPre({ data, meta, T, act, code, active, setView, openScreen }) {
         <div style="display:flex;flex-direction:column;gap:6px;margin-top:12px">${meta.agenda.map(it => { const g = info(it.key); return html`<div style="display:flex;align-items:center;gap:10px;font-size:14.5px"><span style=${{ width: '10px', height: '10px', borderRadius: '50%', background: g.color }}></span><span style="flex:1;font-weight:700">${g.name}</span><span style="color:rgba(255,255,255,.6)">${it.mins} min</span></div>`; })}</div>
         <div style="font-size:13px;color:rgba(255,255,255,.6);margin-top:12px">${T.planTotal} of ${meta.budget} min budget</div></div>
       <div class="panel"><div style="display:flex;justify-content:space-between;align-items:baseline"><span class="k">Auto-grouping</span><button onClick=${() => setView('groups')} style="font-size:13px;font-weight:800;color:#8fb0ff">Groups →</button></div>
-        <div style="font-size:15px;line-height:1.45;margin-top:10px;color:rgba(255,255,255,.85)">${meta.groupCount} groups. Each student joins the smallest group${meta.avoid !== false ? ', avoiding last session’s groupmates where possible' : ''}.</div>
+        <div style="font-size:15px;line-height:1.45;margin-top:10px;color:rgba(255,255,255,.85)">${meta.groupMode === 'size' ? 'Groups of about ' + meta.groupSize + '. A new group opens when the others are full' : meta.groupCount + ' group' + (meta.groupCount === 1 ? '' : 's') + '. Each student joins the smallest group'}${meta.avoid !== false ? ', avoiding last session’s groupmates where possible' : ''}. Rebalance in Groups before you start.</div>
         <div style="display:flex;flex-direction:column;gap:6px;margin-top:12px"><${GroupBars} data=${data} meta=${meta} active=${active} /></div></div>
     </div>
   </div>`;
@@ -178,13 +201,13 @@ function PushPrompts({ meta, T, act }) {
 function DonePanel({ data, meta, active, act }) {
   const doneSet = new Set(data.doneIds || []);
   const people = active.filter(p => !p.nophone);
-  const n = meta.groupCount || 5, rows = Array.from({ length: n }, () => ({ total: 0, done: 0 }));
+  const n = meta.groupCount || 1, rows = Array.from({ length: n }, () => ({ total: 0, done: 0 }));
   people.forEach(p => { const g = data.groups[p.id]; if (g != null && rows[g]) { rows[g].total++; if (doneSet.has(p.id)) rows[g].done++; } });
   const doneN = people.filter(p => doneSet.has(p.id)).length;
   return html`<div class="panel">
     <div style="display:flex;justify-content:space-between;align-items:baseline"><span class="k">Done discussing</span><span style="font-size:22px;font-weight:900">${doneN}<span style="font-size:14px;color:rgba(255,255,255,.55);font-weight:700"> of ${people.length}</span></span></div>
     <div class="bar" style="margin-top:10px"><div style=${{ width: (people.length ? doneN / people.length * 100 : 0) + '%', background: '#54d68d', transition: 'width .4s' }}></div></div>
-    <div style="display:flex;flex-direction:column;gap:6px;margin-top:12px">${rows.map((r, g) => { const k = G(g), all = r.total > 0 && r.done === r.total; return html`<div style="display:flex;align-items:center;gap:10px;font-size:13.5px"><span style=${{ width: '18px', color: k.base }}>${k.sym}</span><span style="flex:1;font-weight:700">${gLabel(g)}</span><span style=${{ fontWeight: 800, color: all ? '#54d68d' : 'rgba(255,255,255,.75)' }}>${all ? '✓ All done' : r.done + ' / ' + r.total}</span></div>`; })}</div>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-top:12px">${rows.map((r, g) => { const k = G(g), all = r.total > 0 && r.done === r.total; return html`<div style="display:flex;align-items:center;gap:10px;font-size:13.5px"><span style=${{ width: '18px', color: k.base, display: 'flex' }}><${Shape} g=${g} size=${14} /></span><span style="flex:1;font-weight:700">${gLabel(g)}</span><span style=${{ fontWeight: 800, color: all ? '#54d68d' : 'rgba(255,255,255,.75)' }}>${all ? '✓ All done' : r.done + ' / ' + r.total}</span></div>`; })}</div>
     <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px"><span style="font-size:12px;color:rgba(255,255,255,.5);line-height:1.4">Students tap “We're done” on their phones. Resets on Next, a new prompt, or regrouping.</span><button class="gbtn" style="min-height:36px;font-size:12.5px;flex-shrink:0" onClick=${() => act('resetDone', {}, 'Done marks cleared')}>Reset</button></div>
   </div>`;
 }
@@ -242,58 +265,118 @@ function RunLive({ data, meta, T, act, active, online, setView, setGuide, openSc
 }
 
 function Groups({ data, meta, act, active, showToast }) {
-  const [draft, setDraft] = useState(null);
+  const [draft, setDraft] = useState(null);        // previewed assignment: { map, n, mode, size }
+  const [mode, setMode] = useState(meta.groupMode || 'count');
+  const [size, setSize] = useState(meta.groupSize || 4);
   const [count, setCount] = useState(meta.groupCount || 5);
   const [sel, setSel] = useState(null);
   const [seed, setSeed] = useState(1);
-  const [npName, setNpName] = useState('');
   const [dragId, setDragId] = useState(null);
   const locked = meta.locked || [];
   const avoid = meta.avoid !== false;
-  const map = draft || data.groups;
-  const n = draft ? count : (meta.groupCount || 5);
+  const N = active.length;
+  const phones = active.filter(p => !p.nophone).length;
+  const map = draft ? draft.map : data.groups;
+  const n = draft ? draft.n : (meta.groupCount || 1);
   const cols = Array.from({ length: n }, () => []);
   active.forEach(p => { const g = map[p.id]; if (g != null && cols[g]) cols[g].push(p); });
   const stats = pairStats(map, active);
-  const reshuffle = (c = n) => { const s = seed + 1; setSeed(s); setCount(c); setDraft(assignGroups(active, c, locked.slice(0, c), data.groups, avoid, s + Date.now() % 1000)); setSel(null); };
+  const preview = (m = mode, sz = size, c = count) => {
+    const nn = planCount(N, m, sz, c), s2 = seed + 1; setSeed(s2);
+    if (!N) { act('groupMode', { mode: m, size: sz, count: nn }); setDraft(null); return; }
+    setDraft({ map: assignGroups(active, nn, locked.slice(0, nn), data.groups, avoid, s2 + Date.now() % 1000), n: nn, mode: m, size: sz });
+    setSel(null);
+  };
+  const setRule = (m, sz, c) => { setMode(m); setSize(sz); setCount(c); preview(m, sz, c); };
   const rebalance = () => {
-    const m = { ...data.groups };
-    for (let k = 0; k < 60; k++) {
-      const arr = Array.from({ length: n }, () => []); active.forEach(p => { if (arr[m[p.id]]) arr[m[p.id]].push(p); });
+    const m2 = { ...data.groups };
+    for (let k = 0; k < 400; k++) {
+      const arr = Array.from({ length: n }, () => []); active.forEach(p => { if (arr[m2[p.id]]) arr[m2[p.id]].push(p); });
       const sz = arr.map(a => a.length), open = [...sz.keys()].filter(g => !locked[g]), pool = open.length > 1 ? open : [...sz.keys()];
       const big = pool.reduce((a, g) => sz[g] > sz[a] ? g : a, pool[0]), small = pool.reduce((a, g) => sz[g] < sz[a] ? g : a, pool[0]);
-      if (sz[big] - sz[small] <= 1) break; m[arr[big][arr[big].length - 1].id] = small;
+      if (sz[big] - sz[small] <= 1) break; m2[arr[big][arr[big].length - 1].id] = small;
     }
-    setCount(n); setDraft(m); setSel(null);
+    setDraft({ map: m2, n, mode: meta.groupMode, size: meta.groupSize }); setSel(null);
   };
-  const moveTo = (id, g) => { if (!id) return; setDraft({ ...(draft || data.groups), [id]: g }); if (!draft) setCount(n); setSel(null); };
-  const send = async () => { if (await act('groups', { map: draft, groupCount: count, locked: locked.slice(0, count) }, 'New groups sent to ' + active.length + ' phones')) setDraft(null); };
+  const moveTo = (id, g) => { if (!id) return; setDraft({ ...(draft || { n, mode: meta.groupMode, size: meta.groupSize }), map: { ...map, [id]: g } }); setSel(null); };
+  const send = async () => {
+    if (await act('groups', { map: draft.map, mode: draft.mode, size: draft.size, count: draft.n, locked: locked.slice(0, draft.n) }, 'New groups sent to ' + phones + ' phone' + (phones === 1 ? '' : 's'))) setDraft(null);
+  };
+  const cancel = () => { setDraft(null); setSel(null); setMode(meta.groupMode || 'count'); setSize(meta.groupSize || 4); setCount(meta.groupCount || 5); };
   const toggleLock = (g) => { const l = Array.from({ length: n }, (_, i) => !!locked[i]); l[g] = !l[g]; act('lock', { locked: l }, gLabel(g) + (l[g] ? ' locked — reshuffles won’t touch it' : ' unlocked')); };
   const selP = sel && active.find(p => p.id === sel);
+  const planned = planCount(N, mode, size, count);
+  const stepBtn = 'width:40px;height:40px;border-radius:9px;background:rgba(255,255,255,.06);font-size:20px';
+  const nd = active.filter(p => p.nophone).length;
   return html`<div class="col">
-    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-      <div style="margin-right:auto"><div style="font-size:28px;font-weight:900;letter-spacing:-.5px">Groups</div><div style="font-size:14px;color:rgba(255,255,255,.6)">${active.length} students · ${stats.fresh} new pairs${stats.rep ? ' · ' + stats.rep + ' repeats from last session' : ''}</div></div>
-      <div style="display:flex;align-items:center;gap:6px;background:#1a1c24;border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:4px">
-        <button onClick=${() => n > 2 && reshuffle(n - 1)} aria-label="Fewer groups" style="width:40px;height:40px;border-radius:9px;background:rgba(255,255,255,.06);font-size:20px">−</button><span style="font-size:14.5px;font-weight:800;padding:0 8px">${n} groups</span><button onClick=${() => n < 5 && reshuffle(n + 1)} aria-label="More groups" style="width:40px;height:40px;border-radius:9px;background:rgba(255,255,255,.06);font-size:20px">+</button></div>
+    <div style="display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap">
+      <div style="margin-right:auto"><div style="font-size:28px;font-weight:900;letter-spacing:-.5px">Groups</div><div style="font-size:14px;color:rgba(255,255,255,.6)">${N} student${N === 1 ? '' : 's'} in the class${nd ? ' (incl. ' + nd + ' without a device)' : ''} · ${stats.fresh} new pairs${stats.rep ? ' · ' + stats.rep + ' repeats from last session' : ''}</div></div>
       <button onClick=${() => act('settings', { avoid: !avoid })} style="min-height:48px;display:flex;align-items:center;gap:10px;background:#1a1c24;border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:0 14px;font-size:14px;font-weight:700">Avoid last session's groups <${Toggle} on=${avoid} /></button>
-      <button class="gbtn blue" style="min-height:48px" onClick=${() => reshuffle()}>Reshuffle</button>
+    </div>
+    <div class="panel" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <div style="display:flex;gap:4px;background:rgba(255,255,255,.05);border-radius:12px;padding:4px" role="group" aria-label="How to make groups">
+        ${[['size', 'By group size'], ['count', 'By number of groups']].map(([m, l]) => html`<button onClick=${() => setRule(m, size, count)} aria-pressed=${mode === m} style=${{ minHeight: '40px', padding: '0 14px', borderRadius: '9px', fontSize: '14px', fontWeight: 800, background: mode === m ? '#2e6bff' : 'transparent', color: mode === m ? '#fff' : 'rgba(255,255,255,.65)' }}>${l}</button>`)}
+      </div>
+      ${mode === 'size'
+        ? html`<div style="display:flex;align-items:center;gap:6px"><button style=${stepBtn} aria-label="Smaller groups" onClick=${() => size > 2 && setRule('size', size - 1, count)}>−</button><span style="font-size:15px;font-weight:800;min-width:118px;text-align:center">${size} per group</span><button style=${stepBtn} aria-label="Bigger groups" onClick=${() => size < 50 && setRule('size', size + 1, count)}>+</button></div>`
+        : html`<div style="display:flex;align-items:center;gap:6px"><button style=${stepBtn} aria-label="Fewer groups" onClick=${() => count > 1 && setRule('count', size, count - 1)}>−</button><span style="font-size:15px;font-weight:800;min-width:118px;text-align:center">${count} group${count === 1 ? '' : 's'}</span><button style=${stepBtn} aria-label="More groups" onClick=${() => count < MAX_GROUPS && setRule('count', size, count + 1)}>+</button></div>`}
+      <div style="flex:1;min-width:200px;font-size:14px;color:rgba(255,255,255,.75)">${N
+        ? html`${N} student${N === 1 ? '' : 's'} → <b>${planned} group${planned === 1 ? '' : 's'}</b>, ${sizeRange(N, planned)}${mode === 'size' && Math.round(N / size) > MAX_GROUPS ? ' (capped at ' + MAX_GROUPS + ' groups)' : ''}`
+        : 'No students yet. This rule applies as they join.'}</div>
+      <button class="gbtn blue" style="min-height:48px" disabled=${!N} onClick=${() => preview()}>${draft ? 'Shuffle again' : 'Make new groups'}</button>
     </div>
     ${draft && html`<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:rgba(245,163,0,.1);border:1px solid rgba(245,163,0,.4);border-radius:16px;padding:14px 16px">
       <div style="flex:1;min-width:220px"><div style="font-size:15px;font-weight:800;color:#f5c26b">Preview — phones haven't changed yet</div><div style="font-size:13.5px;color:rgba(255,255,255,.7);margin-top:2px">Tap a name, then "Move here," to adjust. Send when it looks right.</div></div>
-      <button class="gbtn" onClick=${() => reshuffle()}>Shuffle again</button><button class="gbtn" onClick=${() => { setDraft(null); setCount(meta.groupCount || 5); setSel(null); }}>Cancel</button><button class="gbtn gold" onClick=${send}>Send to ${active.length} phones</button></div>`}
+      <button class="gbtn" onClick=${cancel}>Cancel</button><button class="gbtn gold" onClick=${send}>Send to ${phones} phone${phones === 1 ? '' : 's'}</button></div>`}
     ${!draft && drift(data, meta, active) && html`<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:#1a1c24;border:1px solid rgba(245,163,0,.35);border-radius:16px;padding:12px 16px"><span style="flex:1;font-size:14px;color:#f5c26b;font-weight:700">Group sizes drifted. ${drift(data, meta, active)}</span><button class="gbtn gold" onClick=${rebalance}>Preview rebalance</button></div>`}
     <div style="font-size:13px;color:rgba(255,255,255,.5)">Tap a name and then "Move here" (or drag on a laptop). Locked groups stay put when you reshuffle.</div>
-    <div class="board">${cols.map((ms, g) => { const k = G(g), isLocked = !!locked[g]; return html`<div onDragOver=${e => e.preventDefault()} onDrop=${e => { e.preventDefault(); moveTo(dragId, g); setDragId(null); }} style="background:#1a1c24;border:1px solid rgba(255,255,255,.08);border-radius:16px;overflow:hidden;min-height:200px">
+    <div class="board">${cols.map((ms, g) => { const k = G(g), isLocked = !!locked[g]; return html`<div onDragOver=${e => e.preventDefault()} onDrop=${e => { e.preventDefault(); moveTo(dragId, g); setDragId(null); }} style="background:#1a1c24;border:1px solid rgba(255,255,255,.08);border-radius:16px;overflow:hidden;min-height:160px">
       <div style=${{ height: '6px', background: k.base }}></div>
-      <div style="display:flex;align-items:center;gap:8px;padding:12px 12px 8px"><span style=${{ color: k.base, fontSize: '16px' }}>${k.sym}</span><span style="flex:1;min-width:0;font-size:14.5px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${gLabel(g)}</span><span style="font-size:13px;font-weight:800;color:rgba(255,255,255,.6)">${ms.length}</span></div>
+      <div style="display:flex;align-items:center;gap:8px;padding:12px 12px 8px"><span style=${{ color: k.base, display: 'flex' }}><${Shape} g=${g} size=${16} /></span><span style="flex:1;min-width:0;font-size:14.5px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${gLabel(g)}</span><span style="font-size:13px;font-weight:800;color:rgba(255,255,255,.6)">${ms.length}</span></div>
       <div style="padding:0 12px 8px"><button onClick=${() => toggleLock(g)} style=${{ minHeight: '30px', padding: '0 10px', borderRadius: '8px', fontSize: '12px', fontWeight: 800, background: isLocked ? 'rgba(245,163,0,.2)' : 'rgba(255,255,255,.06)', color: isLocked ? '#f5c26b' : 'rgba(255,255,255,.7)' }}>${isLocked ? 'Locked' : 'Lock'}</button></div>
       <div style="display:flex;flex-direction:column;gap:5px;padding:0 10px 12px">
-        ${ms.slice().sort((a, b) => a.name.localeCompare(b.name)).map(p => { const moved = draft && data.groups[p.id] !== g, s = sel === p.id; const badge = p.nophone ? 'no phone' : moved ? 'moved' : p.late ? 'late' : ''; return html`<button class="member" draggable="true" onDragStart=${e => { setDragId(p.id); try { e.dataTransfer.setData('text/plain', p.id); } catch (_) {} }} onClick=${() => setSel(s ? null : p.id)} style=${{ background: s ? 'rgba(46,107,255,.32)' : moved ? 'rgba(255,255,255,.13)' : 'rgba(255,255,255,.05)', border: '1px solid ' + (s ? '#6f9bff' : moved ? 'rgba(255,255,255,.35)' : 'rgba(255,255,255,.08)') }}><span style="flex:1;min-width:0;font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.name}</span>${badge && html`<span style="font-size:10.5px;font-weight:800;text-transform:uppercase;color:rgba(255,255,255,.65);background:rgba(255,255,255,.08);padding:2px 6px;border-radius:6px">${badge}</span>`}</button>`; })}
+        ${ms.slice().sort((a, b) => a.name.localeCompare(b.name)).map(p => { const moved = draft && data.groups[p.id] !== g, s = sel === p.id; const badge = p.guest ? 'unnamed' : p.nophone ? 'no device' : moved ? 'moved' : p.late ? 'late' : ''; return html`<button class="member" draggable="true" onDragStart=${e => { setDragId(p.id); try { e.dataTransfer.setData('text/plain', p.id); } catch (_) {} }} onClick=${() => setSel(s ? null : p.id)} style=${{ background: s ? 'rgba(46,107,255,.32)' : moved ? 'rgba(255,255,255,.13)' : 'rgba(255,255,255,.05)', border: '1px solid ' + (s ? '#6f9bff' : moved ? 'rgba(255,255,255,.35)' : 'rgba(255,255,255,.08)') }}><span style="flex:1;min-width:0;font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.name}</span>${badge && html`<span style="font-size:10.5px;font-weight:800;text-transform:uppercase;color:rgba(255,255,255,.65);background:rgba(255,255,255,.08);padding:2px 6px;border-radius:6px">${badge}</span>`}</button>`; })}
         ${selP && map[sel] !== g && html`<button onClick=${() => moveTo(sel, g)} style="min-height:40px;border-radius:10px;border:1.5px dashed #6f9bff;color:#8fb0ff;font-size:13px;font-weight:800">Move ${first(selP.name)} here</button>`}
       </div></div>`; })}</div>
-    ${selP && !draft && html`<div class="panel" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><span style="flex:1;font-size:14px">${selP.name} left early or joined by mistake?</span><button class="gbtn" onClick=${() => { act('remove', { sid: selP.id }, selP.name + ' removed from the class'); setSel(null); }}>Remove from class</button></div>`}
-    <div class="panel"><div class="k">Student without a phone?</div><div style="font-size:13.5px;color:rgba(255,255,255,.6);margin-top:6px">Add them by name. They'll go into the smallest group and appear on the projector's group list.</div>
-      <form style="display:flex;gap:8px;margin-top:10px;max-width:460px" onSubmit=${e => { e.preventDefault(); if (npName.trim()) { act('addNoPhone', { name: npName.trim() }, npName.trim() + ' added'); setNpName(''); } }}><input class="field" style="padding:11px 13px;font-size:14px" value=${npName} onInput=${e => setNpName(e.target.value)} placeholder="Student name" maxlength="40" /><button class="gbtn" type="submit">Add</button></form></div>
+    ${selP && !draft && html`<${SelectedStudent} p=${selP} act=${act} onDone=${() => setSel(null)} />`}
+    <${NoDevice} active=${active} meta=${meta} act=${act} />
+  </div>`;
+}
+
+function SelectedStudent({ p, act, onDone }) {
+  const [name, setName] = useState(p.name);
+  useEffect(() => setName(p.name), [p.id]);
+  return html`<div class="panel" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    ${p.nophone
+      ? html`<span style="font-size:14px;font-weight:700">Rename</span>
+        <form style="display:flex;gap:8px;flex:1;min-width:240px" onSubmit=${async e => { e.preventDefault(); if (name.trim() && name.trim() !== p.name && await act('rename', { sid: p.id, name: name.trim() }, 'Renamed to ' + name.trim())) onDone(); }}>
+          <input class="field" style="padding:10px 12px;font-size:14px" value=${name} onInput=${e => setName(e.target.value)} placeholder="e.g. Sam Rivera" maxlength="40" aria-label="Student name" /><button class="gbtn" type="submit">Save</button></form>`
+      : html`<span style="flex:1;font-size:14px">${p.name} left early or joined by mistake?</span>`}
+    <button class="gbtn" onClick=${async () => { if (await act('remove', { sid: p.id }, p.name + ' removed from the class')) onDone(); }}>Remove from class</button>
+  </div>`;
+}
+
+// Everyone in the room gets a group, phone or not: add people by name, or top up to a headcount with unnamed seats.
+function NoDevice({ active, meta, act }) {
+  const [names, setNames] = useState('');
+  const [head, setHead] = useState(meta.headcount ? String(meta.headcount) : '');
+  const list = names.split(/\n|,/).map(x => x.trim()).filter(Boolean);
+  const want = Math.max(0, Math.floor(Number(head) || 0)), need = Math.max(0, want - active.length);
+  const onPhones = active.filter(p => !p.nophone).length, byHand = active.length - onPhones;
+  return html`<div class="panel" style="display:flex;flex-direction:column;gap:16px">
+    <div><div class="k">Students without a device</div><div style="font-size:13.5px;color:rgba(255,255,255,.65);margin-top:6px;line-height:1.45">Everyone in the room should be in a group, even without a phone. They're included every time you make groups and appear on the projector's group list.</div></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px">
+      <form style="display:flex;flex-direction:column;gap:8px" onSubmit=${e => { e.preventDefault(); if (want && need) act('topUp', { headcount: want }, 'Added ' + need + ' unnamed seat' + (need === 1 ? '' : 's')); }}>
+        <div style="font-size:14px;font-weight:800">Count the room</div>
+        <div style="display:flex;gap:8px"><input class="field" type="number" min="0" inputmode="numeric" style="padding:10px 12px;font-size:14px" value=${head} onInput=${e => setHead(e.target.value)} placeholder="e.g. 32 people in the room" aria-label="People in the room" /><button class="gbtn" type="submit" disabled=${!need} style="white-space:nowrap">${need ? 'Add ' + need + ' seat' + (need === 1 ? '' : 's') : 'All counted'}</button></div>
+        <div style="font-size:12.5px;color:rgba(255,255,255,.55);line-height:1.4">${onPhones} on phones${byHand ? ' + ' + byHand + ' added by hand' : ''} = ${active.length}. ${want ? (need ? 'Adds ' + need + ' unnamed seat' + (need === 1 ? '' : 's') + ' (Guest 1, 2…) so everyone gets a group. Tap one in a group to rename it.' : 'Everyone in the room is counted.') : 'Type how many people are present.'}</div>
+      </form>
+      <form style="display:flex;flex-direction:column;gap:8px" onSubmit=${async e => { e.preventDefault(); if (list.length && await act('addNoPhone', { names: list }, 'Added ' + list.length + ' student' + (list.length === 1 ? '' : 's'))) setNames(''); }}>
+        <div style="font-size:14px;font-weight:800">Add by name</div>
+        <textarea class="field" rows="3" style="padding:10px 12px;font-size:14px" value=${names} onInput=${e => setNames(e.target.value)} placeholder=${'One name per line, e.g.\nSam Rivera\nPriya Shah'} aria-label="Names of students without a device"></textarea>
+        <div><button class="gbtn" type="submit" disabled=${!list.length}>Add ${list.length || ''} student${list.length === 1 ? '' : 's'}</button></div>
+      </form>
+    </div>
   </div>`;
 }
 
@@ -368,13 +451,13 @@ function Insights({ data, meta, act, active, online, setView }) {
     <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap"><div style="margin-right:auto"><div style="font-size:28px;font-weight:900;letter-spacing:-.5px">Insights</div><div style="font-size:14px;color:rgba(255,255,255,.6)">A pulse check, not a grade.</div></div>
       <div style="display:flex;gap:4px;background:#1a1c24;border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:4px">${tabs.map(([k, l]) => html`<button onClick=${() => setTab(k)} style=${{ minHeight: '40px', padding: '0 16px', borderRadius: '9px', fontSize: '14px', fontWeight: 800, background: tab === k ? '#2e6bff' : 'transparent', color: tab === k ? '#fff' : 'rgba(255,255,255,.6)' }}>${l}</button>`)}</div></div>
     ${tab === 'progress' && html`
-      <div class="panel" style="font-size:13.5px;color:rgba(255,255,255,.7);line-height:1.5">Each student has three check-ins: <b>joined today</b>, <b>answered your questions</b>, and <b>saved at least one connection</b>. The dot shows whether their phone is connected right now.</div>
+      <div class="panel" style="font-size:13.5px;color:rgba(255,255,255,.7);line-height:1.5">Each student has three check-ins: <b>joined today</b>, <b>answered your questions</b>, and <b>made at least one connection</b> (a request they sent or received that was accepted). The dot shows whether their phone is connected right now.</div>
       ${!rows.length && html`<div class="panel" style="color:rgba(255,255,255,.6)">No students yet.</div>`}
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:8px">${rows.map(({ p, done, steps, on }) => { const g = data.groups[p.id], k = g != null ? G(g) : null; return html`<div style="display:flex;align-items:center;gap:12px;background:#1a1c24;border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:10px 14px">
         <span style=${{ width: '8px', height: '8px', borderRadius: '50%', flexShrink: 0, background: p.status !== 'active' ? 'rgba(255,255,255,.25)' : on ? '#54d68d' : '#f5c26b' }}></span>
-        <span style=${{ width: '16px', color: k ? k.base : 'rgba(255,255,255,.3)' }}>${k ? k.sym : '–'}</span>
-        <span style="flex:1;min-width:0;font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.name}${p.nophone ? ' · no phone' : ''}</span>
-        <span style="display:flex;gap:4px">${steps.map((s, i) => html`<span title=${['Joined today', 'Answered questions', 'Saved a connection'][i]} style=${{ width: '22px', height: '6px', borderRadius: '3px', background: s ? '#6f9bff' : 'rgba(255,255,255,.12)' }}></span>`)}</span>
+        <span style=${{ width: '16px', color: k ? k.base : 'rgba(255,255,255,.3)', display: 'flex' }}>${k ? html`<${Shape} g=${g} size=${14} />` : '–'}</span>
+        <span style="flex:1;min-width:0;font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.name}${p.nophone ? ' · no device' : ''}</span>
+        <span style="display:flex;gap:4px">${steps.map((s, i) => html`<span title=${['Joined today', 'Answered questions', 'Made a connection (accepted)'][i]} style=${{ width: '22px', height: '6px', borderRadius: '3px', background: s ? '#6f9bff' : 'rgba(255,255,255,.12)' }}></span>`)}</span>
         <span style="width:64px;text-align:right;font-size:12.5px;font-weight:700;color:rgba(255,255,255,.6)">${p.status === 'away' ? 'Not yet' : done + ' of 3'}</span></div>`; })}</div>`}
     ${tab === 'questions' && html`<div class="grid2">
       <div class="panel"><div class="k">Questions students see at Welcome</div>
@@ -390,7 +473,7 @@ function Wrap({ data, meta, act, active, code, showToast, onSignOut }) {
   const [confirmDel, setConfirmDel] = useState(false);
   const roster = data.students.filter(p => p.status === 'active' || p.status === 'away').slice().sort((a, b) => a.name.localeCompare(b.name));
   const emailN = roster.filter(p => p.shareEmail && p.email).length, liN = roster.filter(p => p.shareLinkedin && p.linkedin).length;
-  const total = Math.round(Object.values(data.connCounts).reduce((a, b) => a + b, 0) / 2);
+  const total = (data.connTotals || {}).accepted || 0, waiting = (data.connTotals || {}).pending || 0;
   const csvCell = (s) => '"' + String(s || '').replace(/"/g, '""') + '"';
   const download = () => {
     const lines = [['Name', 'Email', 'LinkedIn', 'Group'].join(',')].concat(roster.map(p => [p.name, p.shareEmail ? p.email : '', p.shareLinkedin ? p.linkedin : '', data.groups[p.id] != null ? gLabel(data.groups[p.id]) : ''].map(csvCell).join(',')));
@@ -402,7 +485,7 @@ function Wrap({ data, meta, act, active, code, showToast, onSignOut }) {
     <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap"><div style="margin-right:auto"><div style="font-size:28px;font-weight:900;letter-spacing:-.5px">Wrap-up</div><div style="font-size:14px;color:rgba(255,255,255,.6)">At the Wrap-up activity, students get one screen: who they met, save, done.</div></div>
       ${meta.launched && !meta.ended && html`<button class="gbtn blue" onClick=${() => act('next', {}, 'Advanced')}>${meta.seg >= meta.agenda.length - 1 ? 'End class' : 'Next activity'} →</button>`}</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
-      <div style="background:linear-gradient(150deg,#2e6bff,#173b8c);border-radius:18px;padding:18px"><div style="font-size:36px;font-weight:900">${total}</div><div style="font-size:13.5px;color:rgba(255,255,255,.88)">connections saved between students</div></div>
+      <div style="background:linear-gradient(150deg,#2e6bff,#173b8c);border-radius:18px;padding:18px"><div style="font-size:36px;font-weight:900">${total}</div><div style="font-size:13.5px;color:rgba(255,255,255,.88)">connections made (accepted)${waiting ? ' · ' + waiting + ' requests waiting' : ''}</div></div>
       <div style="background:linear-gradient(150deg,#2fbf71,#14663c);border-radius:18px;padding:18px"><div style="font-size:36px;font-weight:900">${active.length}</div><div style="font-size:13.5px;color:rgba(255,255,255,.9)">students in today's session</div></div>
       <div class="panel"><div style="font-size:36px;font-weight:900">${Object.keys(data.answers).length}</div><div style="font-size:13.5px;color:rgba(255,255,255,.65)">students answered your questions</div></div>
     </div>
@@ -422,7 +505,7 @@ function Wrap({ data, meta, act, active, code, showToast, onSignOut }) {
     </div>
     <div class="panel" style="display:flex;flex-direction:column;gap:12px">
       <div style="font-size:18px;font-weight:900">Next class</div>
-      <div style="font-size:14px;color:rgba(255,255,255,.7);line-height:1.5">Start a new session with the same code. Students keep their profile and connections, rejoin with one tap, and get grouped with new faces.</div>
+      <div style="font-size:14px;color:rgba(255,255,255,.7);line-height:1.5">Start a new session with the same code. Students keep their profile and connections, rejoin with one tap, and get grouped with new faces. Students you added by name stay in the class; unnamed seats are cleared.</div>
       <div><button class="gbtn blue" onClick=${() => { if (confirm('Start a new session? Groups and today’s answers reset; students and connections stay.')) act('newSession', {}, 'New session ready — students rejoin with the same code'); }}>Start a new session</button></div>
     </div>
     <div class="panel" style="display:flex;flex-direction:column;gap:12px;border-color:rgba(255,107,94,.25)">

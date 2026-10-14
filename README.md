@@ -37,6 +37,19 @@ A full 75-minute class with about 30 phones uses roughly 100,000 database comman
 - Two truths stay on the student's phone.
 - **Wrap-up → Delete class data** permanently erases a class from the database.
 
-## Local development
+## Privacy model
 
-`api/rpc.js` exports `handle(req)`; any small Node server that serves the static files and routes `/api/rpc` to it works for testing, with an Upstash-compatible REST endpoint (or a local stand-in) in the environment variables above.
+- When a student joins, their phone gets a secret key. Every student request must carry it, so knowing a classmate's id (which is in the roster) is not enough to read or change their data.
+- Connections are requests: A asks, B accepts or declines. Contact details are shared only after acceptance, and only the fields each student chose to share (off by default). Declines are never revealed to the sender.
+- Facilitator data requires the class PIN. The projector view contains names and groups only.
+- Classes are erased after 60 days without use; **Wrap-up → Delete class data** erases one immediately.
+
+## Email rules
+
+`shared/validate.js` is used by both the phone and the server. Each class has an `emailPolicy` (`required: true`, `domains: []`). Adding a domain, e.g. `['purdue.edu']`, limits sign-up to that domain and its subdomains.
+
+## Testing
+
+- `npm test` runs the server tests against an in-memory database (`scripts/mock-redis.js`).
+- `npm run dev` runs the whole site locally on http://localhost:5173 with in-memory data.
+- Preview deployments (any branch other than `main`) store data under a separate `wlp:` prefix, so they never touch live classes.
