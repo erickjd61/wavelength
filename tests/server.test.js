@@ -328,10 +328,9 @@ test('a student who comes back on a new phone returns to their own group', async
   const t = await withClock(t0 + 5 * 60e3, () => teacher(code));
   assert.equal(t.students.find(p => p.id === ids[4].sid).status, 'away', 'old entry steps aside');
   assert.equal(t.students.filter(p => p.status === 'active').length, 6, 'no duplicate in the roster');
-  // If the original phone is still active, it is not pushed out (typing someone's email can't kick them).
+  // If the original phone is still in use, the newcomer is a separate student: nobody is hidden or moved.
   await withClock(t0 + 6 * 60e3, () => get({ code, role: 'student', sid: ids[0].sid, v: '0', seen: '1' }, { 'x-wl-key': ids[0].key }));
-  const dup = await withClock(t0 + 6 * 60e3 + 1, () => post({ op: 'join', code, profile: { name: 'H0', email: 'h0@school.edu' } }));
-  assert.equal(dup.g, 0);
+  await withClock(t0 + 6 * 60e3 + 1, () => post({ op: 'join', code, profile: { name: 'H0 second phone', email: 'h0@school.edu' } }));
   assert.equal((await withClock(t0 + 6 * 60e3 + 2, () => me(code, ids[0]))).me.status, 'active');
 });
 
@@ -367,17 +366,14 @@ test('Collective Biography: one shared answer per group, any member edits, group
   assert.equal((await me(code, s[0])).me.bio.length, 0);
 });
 
-test('a duplicate left behind by a phone switch steps aside once the old phone goes quiet', async () => {
+test('students sharing one email (e.g. test phones) all stay in the class over time', async () => {
   const t0 = Date.now();
   const code = await withClock(t0, () => makeClass());
-  const a = await withClock(t0, () => join(code, 'Jen', { email: 'jen@school.edu' }));
-  await withClock(t0, () => fac(code, 'start'));
-  const b = await withClock(t0 + 30e3, () => post({ op: 'join', code, profile: { name: 'Jen', email: 'jen@school.edu' } }));
-  let t = await withClock(t0 + 31e3, () => teacher(code));
-  assert.equal(t.students.filter(p => p.status === 'active').length, 2, 'both kept while the old phone may still be in use');
-  assert.equal(t.students.find(p => p.id === b.sid).late, false, 'returning student is not marked late');
-  await withClock(t0 + 4 * 60e3, () => get({ code, role: 'student', sid: b.sid, v: '0', seen: '1' }, { 'x-wl-key': b.key }));
-  t = await withClock(t0 + 4 * 60e3 + 1, () => teacher(code));
-  assert.deepEqual(t.students.filter(p => p.status === 'active').map(p => p.id), [b.sid]);
-  assert.equal(t.students.find(p => p.id === a.sid).status, 'away');
+  const phones = [];
+  for (let i = 0; i < 4; i++) phones.push(await withClock(t0 + i * 1000, () => post({ op: 'join', code, profile: { name: 'Tester ' + i, email: 'same@school.edu' } })));
+  // Only some phones poll; the others sit idle for 10 minutes. Nobody may disappear or be bounced.
+  for (let m = 1; m <= 10; m++) await withClock(t0 + m * 60e3, () => get({ code, role: 'student', sid: phones[0].sid, v: '0', seen: '1' }, { 'x-wl-key': phones[0].key }));
+  const t = await withClock(t0 + 10 * 60e3 + 5, () => teacher(code));
+  assert.equal(t.students.filter(p => p.status === 'active').length, 4);
+  for (const p of phones) assert.equal((await withClock(t0 + 10 * 60e3 + 6, () => me(code, p))).me.status, 'active');
 });

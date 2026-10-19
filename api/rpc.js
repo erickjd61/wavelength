@@ -80,16 +80,6 @@ async function load(code, now = Date.now(), noClose) {
   const st = { meta: m, students, groups, keys, seen: seenO, answers, done, pairs, bios, v: Number(v || 0), openedAt: open ? Number(open) : null };
   // Legacy sessions (active before auto-close existed) count from the release.
   if (!st.openedAt && (m.launched || Object.values(students).some(p => p.status === 'active' && !p.nophone))) st.openedAt = Math.max(m.createdAt || 0, AUTOCLOSE_RELEASE);
-  // A student who moved to a new phone shows up twice until the old phone goes quiet; then the old entry steps aside.
-  const byEmail = {};
-  Object.values(students).forEach(p => { if (p.status === 'active' && !p.nophone && p.email) (byEmail[p.email.toLowerCase()] = byEmail[p.email.toLowerCase()] || []).push(p); });
-  const stale = [];
-  for (const e in byEmail) {
-    const list = byEmail[e]; if (list.length < 2) continue;
-    const newest = list.reduce((x, y) => ((seenO[y.id] || 0) > (seenO[x.id] || 0) ? y : x));
-    list.forEach(p => { if (p !== newest && now - (seenO[p.id] || 0) > STALE_MS && groups[p.id] != null && groups[p.id] === groups[newest.id]) { p.status = 'away'; stale.push(p); } });
-  }
-  if (stale.length) await redis([['HSET', K(code, 's'), ...stale.flatMap(p => [p.id, JSON.stringify(p)])], ['INCR', K(code, 'v')]]);
   if (!noClose && st.openedAt && now - st.openedAt >= SESSION_MAX_MS) {
     // Only one request performs the close; the rest reload the result.
     const [lock] = await redis([['SET', K(code, 'closing'), '1', 'NX', 'EX', 60]]);
@@ -383,10 +373,13 @@ async function studentOp(code, b, now) {
       // Same student on a new phone (or after clearing the browser): matched by email, they go back to their
       // own group instead of being placed somewhere new. Their old entry steps aside only if that phone has gone quiet.
       if (newKey && em.value) {
-        const prev = Object.values(st.students).find(q => q.id !== id && !q.nophone && q.status === 'active' && (q.email || '').toLowerCase() === em.value.toLowerCase() && st.groups[q.id] != null);
+        // Only an entry whose phone has gone quiet counts as "the same student": people (or test phones) that
+        // share an email address but are both in use are treated as separate students and never hidden.
+        const prev = Object.values(st.students).find(q => q.id !== id && !q.nophone && q.status === 'active' && (q.email || '').toLowerCase() === em.value.toLowerCase()
+          && st.groups[q.id] != null && (!st.seen[q.id] || now - st.seen[q.id] > STALE_MS));
         if (prev) {
           st.groups[id] = st.groups[prev.id];
-          if (!st.seen[prev.id] || now - st.seen[prev.id] > STALE_MS) { prev.status = 'away'; cmds.push(['HSET', K(code, 's'), prev.id, JSON.stringify(prev)]); }
+          prev.status = 'away'; cmds.push(['HSET', K(code, 's'), prev.id, JSON.stringify(prev)]);
           cmds.push(['HSET', K(code, 'g'), id, String(st.groups[id])]);
           p.late = !!prev.late; p.returning = true;
         }
