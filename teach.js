@@ -103,7 +103,7 @@ function TeachApp({ code, pin, onSignOut }) {
     <div class="t-top">
       <div style="display:flex;align-items:center;gap:10px"><${Dots} size=${9} /><span style="font-size:18px;font-weight:900;letter-spacing:-.3px">Wavelength</span></div>
       <div class="hide-sm" style="width:1px;height:28px;background:rgba(255,255,255,.1)"></div>
-      <div style="min-width:0"><div style="font-size:15px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:280px">${meta.name}</div><div style="font-size:12.5px;color:rgba(255,255,255,.55)">Session ${meta.session || 1} · ${active.length} here</div></div>
+      <div style="min-width:0"><div style="font-size:15px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:280px">${meta.name}</div><div style="font-size:12.5px;color:rgba(255,255,255,.55)">Session ${meta.session || 1} · ${active.length} here${data.autoCloseAt ? html` · <span title="Sessions close on their own 24 hours after they begin">closes ${new Date(data.autoCloseAt).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}</span>` : ''}</div></div>
       <div style=${{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', fontWeight: 800, background: 'rgba(255,255,255,.05)', padding: '6px 11px', borderRadius: '20px', color: meta.ended ? 'rgba(255,255,255,.55)' : live ? '#54d68d' : '#f5c26b' }}><span style="width:7px;height:7px;border-radius:50%;background:currentColor"></span>${meta.ended ? 'Ended' : live ? (meta.running ? 'Live' : 'Paused') : 'Not started'}</div>
       ${offline && html`<div style="font-size:12.5px;color:#f5c26b;font-weight:700">Connection hiccup — retrying…</div>`}
       <div style="flex:1"></div>
@@ -208,7 +208,7 @@ function DonePanel({ data, meta, active, act }) {
     <div style="display:flex;justify-content:space-between;align-items:baseline"><span class="k">Done discussing</span><span style="font-size:22px;font-weight:900">${doneN}<span style="font-size:14px;color:rgba(255,255,255,.55);font-weight:700"> of ${people.length}</span></span></div>
     <div class="bar" style="margin-top:10px"><div style=${{ width: (people.length ? doneN / people.length * 100 : 0) + '%', background: '#54d68d', transition: 'width .4s' }}></div></div>
     <div style="display:flex;flex-direction:column;gap:6px;margin-top:12px">${rows.map((r, g) => { const k = G(g), all = r.total > 0 && r.done === r.total; return html`<div style="display:flex;align-items:center;gap:10px;font-size:13.5px"><span style=${{ width: '18px', color: k.base, display: 'flex' }}><${Shape} g=${g} size=${14} /></span><span style="flex:1;font-weight:700">${gLabel(g)}</span><span style=${{ fontWeight: 800, color: all ? '#54d68d' : 'rgba(255,255,255,.75)' }}>${all ? '✓ All done' : r.done + ' / ' + r.total}</span></div>`; })}</div>
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px"><span style="font-size:12px;color:rgba(255,255,255,.5);line-height:1.4">Students tap “We're done” on their phones. Resets on Next, a new prompt, or regrouping.</span><button class="gbtn" style="min-height:36px;font-size:12.5px;flex-shrink:0" onClick=${() => act('resetDone', {}, 'Done marks cleared')}>Reset</button></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px"><span style="font-size:12px;color:rgba(255,255,255,.5);line-height:1.4">Students tap “We're done” on their phones. Resets on Next, a new prompt, or new groups.</span><button class="gbtn" style="min-height:36px;font-size:12.5px;flex-shrink:0" onClick=${() => act('resetDone', {}, 'Done marks cleared')}>Reset</button></div>
   </div>`;
 }
 
@@ -284,7 +284,7 @@ function Groups({ data, meta, act, active, showToast }) {
   const preview = (m = mode, sz = size, c = count) => {
     const nn = planCount(N, m, sz, c), s2 = seed + 1; setSeed(s2);
     if (!N) { act('groupMode', { mode: m, size: sz, count: nn }); setDraft(null); return; }
-    setDraft({ map: assignGroups(active, nn, locked.slice(0, nn), data.groups, avoid, s2 + Date.now() % 1000), n: nn, mode: m, size: sz });
+    setDraft({ map: assignGroups(active, nn, locked.slice(0, nn), data.groups, avoid, s2 + Date.now() % 1000), n: nn, mode: m, size: sz, reshuffle: true });
     setSel(null);
   };
   const setRule = (m, sz, c) => { setMode(m); setSize(sz); setCount(c); preview(m, sz, c); };
@@ -300,7 +300,7 @@ function Groups({ data, meta, act, active, showToast }) {
   };
   const moveTo = (id, g) => { if (!id) return; setDraft({ ...(draft || { n, mode: meta.groupMode, size: meta.groupSize }), map: { ...map, [id]: g } }); setSel(null); };
   const send = async () => {
-    if (await act('groups', { map: draft.map, mode: draft.mode, size: draft.size, count: draft.n, locked: locked.slice(0, draft.n) }, 'New groups sent to ' + phones + ' phone' + (phones === 1 ? '' : 's'))) setDraft(null);
+    if (await act('groups', { map: draft.map, mode: draft.mode, size: draft.size, count: draft.n, locked: locked.slice(0, draft.n), reshuffle: !!draft.reshuffle }, draft.reshuffle ? 'New groups sent to ' + phones + ' phone' + (phones === 1 ? '' : 's') : 'Changes sent')) setDraft(null);
   };
   const cancel = () => { setDraft(null); setSel(null); setMode(meta.groupMode || 'count'); setSize(meta.groupSize || 4); setCount(meta.groupCount || 5); };
   const toggleLock = (g) => { const l = Array.from({ length: n }, (_, i) => !!locked[i]); l[g] = !l[g]; act('lock', { locked: l }, gLabel(g) + (l[g] ? ' locked — reshuffles won’t touch it' : ' unlocked')); };
@@ -308,6 +308,13 @@ function Groups({ data, meta, act, active, showToast }) {
   const planned = planCount(N, mode, size, count);
   const stepBtn = 'width:40px;height:40px;border-radius:9px;background:rgba(255,255,255,.06);font-size:20px';
   const nd = active.filter(p => p.nophone).length;
+  // "Done discussing" progress, from students on phones (no-device students can't tap the button).
+  const live = meta.launched && !meta.ended;
+  const doneSet = new Set(data.doneIds || []);
+  const doneOf = (ms) => { const ph = ms.filter(p => !p.nophone); return { done: ph.filter(p => doneSet.has(p.id)).length, total: ph.length }; };
+  const allDone = doneOf(active);
+  const curKey = (meta.agenda[meta.seg] || {}).key;
+  const bioCounts = data.bioCounts || {};
   return html`<div class="col">
     <div style="display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap">
       <div style="margin-right:auto"><div style="font-size:28px;font-weight:900;letter-spacing:-.5px">Groups</div><div style="font-size:14px;color:rgba(255,255,255,.6)">${N} student${N === 1 ? '' : 's'} in the class${nd ? ' (incl. ' + nd + ' without a device)' : ''} · ${stats.fresh} new pairs${stats.rep ? ' · ' + stats.rep + ' repeats from last session' : ''}</div></div>
@@ -329,10 +336,17 @@ function Groups({ data, meta, act, active, showToast }) {
       <div style="flex:1;min-width:220px"><div style="font-size:15px;font-weight:800;color:#f5c26b">Preview — phones haven't changed yet</div><div style="font-size:13.5px;color:rgba(255,255,255,.7);margin-top:2px">Tap a name, then "Move here," to adjust. Send when it looks right.</div></div>
       <button class="gbtn" onClick=${cancel}>Cancel</button><button class="gbtn gold" onClick=${send}>Send to ${phones} phone${phones === 1 ? '' : 's'}</button></div>`}
     ${!draft && drift(data, meta, active) && html`<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:#1a1c24;border:1px solid rgba(245,163,0,.35);border-radius:16px;padding:12px 16px"><span style="flex:1;font-size:14px;color:#f5c26b;font-weight:700">Group sizes drifted. ${drift(data, meta, active)}</span><button class="gbtn gold" onClick=${rebalance}>Preview rebalance</button></div>`}
-    <div style="font-size:13px;color:rgba(255,255,255,.5)">Tap a name and then "Move here" (or drag on a laptop). Locked groups stay put when you reshuffle.</div>
+    ${live && html`<div class="panel" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+      <div style="min-width:170px"><div class="k">Done discussing</div><div style="font-size:13px;color:rgba(255,255,255,.55);margin-top:3px">${info(curKey).name} · resets on Next or new groups</div></div>
+      <div style="flex:1;min-width:200px"><div class="bar" style="height:12px;border-radius:6px"><div style=${{ width: (allDone.total ? allDone.done / allDone.total * 100 : 0) + '%', background: '#54d68d', transition: 'width .4s' }}></div></div></div>
+      <div style="font-size:22px;font-weight:900;white-space:nowrap">${allDone.done}<span style="font-size:14px;color:rgba(255,255,255,.55);font-weight:700"> of ${allDone.total}</span></div>
+      <button class="gbtn" style="min-height:36px;font-size:12.5px" onClick=${() => act('resetDone', {}, 'Done marks cleared')}>Reset</button>
+    </div>`}
+    <div style="font-size:13px;color:rgba(255,255,255,.5)">Tap a name and then "Move here" (or drag on a laptop). Locked groups stay put when you reshuffle. Late joiners go into the smallest group — nobody else moves unless you move them.</div>
     <div class="board">${cols.map((ms, g) => { const k = G(g), isLocked = !!locked[g]; return html`<div onDragOver=${e => e.preventDefault()} onDrop=${e => { e.preventDefault(); moveTo(dragId, g); setDragId(null); }} style="background:#1a1c24;border:1px solid rgba(255,255,255,.08);border-radius:16px;overflow:hidden;min-height:160px">
       <div style=${{ height: '6px', background: k.base }}></div>
       <div style="display:flex;align-items:center;gap:8px;padding:12px 12px 8px"><span style=${{ color: k.base, display: 'flex' }}><${Shape} g=${g} size=${16} /></span><span style="flex:1;min-width:0;font-size:14.5px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${gLabel(g)}</span><span style="font-size:13px;font-weight:800;color:rgba(255,255,255,.6)">${ms.length}</span></div>
+      ${live && !draft && (() => { const d = doneOf(ms), all = d.total > 0 && d.done === d.total; return html`<div style="padding:0 12px 8px"><div style="display:flex;align-items:center;gap:8px;font-size:11.5px;font-weight:800;color:${all ? '#54d68d' : 'rgba(255,255,255,.6)'}"><span style="flex:1;height:6px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden;display:block"><span style=${{ display: 'block', height: '100%', width: (d.total ? d.done / d.total * 100 : 0) + '%', background: '#54d68d', transition: 'width .4s' }}></span></span>${all ? '✓ All done' : d.done + '/' + d.total + ' done'}</div>${curKey === 'biography' && html`<div style="font-size:11.5px;color:rgba(255,255,255,.55);margin-top:4px">${bioCounts[g] || 0} sentence${bioCounts[g] === 1 ? '' : 's'} in their biography</div>`}</div>`; })()}
       <div style="padding:0 12px 8px"><button onClick=${() => toggleLock(g)} style=${{ minHeight: '30px', padding: '0 10px', borderRadius: '8px', fontSize: '12px', fontWeight: 800, background: isLocked ? 'rgba(245,163,0,.2)' : 'rgba(255,255,255,.06)', color: isLocked ? '#f5c26b' : 'rgba(255,255,255,.7)' }}>${isLocked ? 'Locked' : 'Lock'}</button></div>
       <div style="display:flex;flex-direction:column;gap:5px;padding:0 10px 12px">
         ${ms.slice().sort((a, b) => a.name.localeCompare(b.name)).map(p => { const moved = draft && data.groups[p.id] !== g, s = sel === p.id; const badge = p.guest ? 'unnamed' : p.nophone ? 'no device' : moved ? 'moved' : p.late ? 'late' : ''; return html`<button class="member" draggable="true" onDragStart=${e => { setDragId(p.id); try { e.dataTransfer.setData('text/plain', p.id); } catch (_) {} }} onClick=${() => setSel(s ? null : p.id)} style=${{ background: s ? 'rgba(46,107,255,.32)' : moved ? 'rgba(255,255,255,.13)' : 'rgba(255,255,255,.05)', border: '1px solid ' + (s ? '#6f9bff' : moved ? 'rgba(255,255,255,.35)' : 'rgba(255,255,255,.08)') }}><span style="flex:1;min-width:0;font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.name}</span>${badge && html`<span style="font-size:10.5px;font-weight:800;text-transform:uppercase;color:rgba(255,255,255,.65);background:rgba(255,255,255,.08);padding:2px 6px;border-radius:6px">${badge}</span>`}</button>`; })}
@@ -505,7 +519,7 @@ function Wrap({ data, meta, act, active, code, showToast, onSignOut }) {
     </div>
     <div class="panel" style="display:flex;flex-direction:column;gap:12px">
       <div style="font-size:18px;font-weight:900">Next class</div>
-      <div style="font-size:14px;color:rgba(255,255,255,.7);line-height:1.5">Start a new session with the same code. Students keep their profile and connections, rejoin with one tap, and get grouped with new faces. Students you added by name stay in the class; unnamed seats are cleared.</div>
+      <div style="font-size:14px;color:rgba(255,255,255,.7);line-height:1.5">Start a new session with the same code. Students keep their profile and connections, rejoin with one tap, and get grouped with new faces. Students you added by name stay in the class; unnamed seats are cleared. If you forget, the session closes on its own 24 hours after it began.</div>
       <div><button class="gbtn blue" onClick=${() => { if (confirm('Start a new session? Groups and today’s answers reset; students and connections stay.')) act('newSession', {}, 'New session ready — students rejoin with the same code'); }}>Start a new session</button></div>
     </div>
     <div class="panel" style="display:flex;flex-direction:column;gap:12px;border-color:rgba(255,107,94,.25)">

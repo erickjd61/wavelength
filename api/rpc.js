@@ -13,6 +13,10 @@ const NS = process.env.WL_NAMESPACE || (process.env.VERCEL_ENV === 'preview' ? '
 const PUBLIC_BASE = process.env.VERCEL_ENV === 'production' && process.env.VERCEL_PROJECT_PRODUCTION_URL
   ? 'https://' + process.env.VERCEL_PROJECT_PRODUCTION_URL.replace(/^https?:\/\//, '') : (process.env.WL_PUBLIC_BASE || null);
 const CLASS_TTL = 60 * 24 * 3600; // a class is erased after 60 days without use
+const SESSION_MAX_MS = 24 * 3600 * 1000; // a session closes on its own 24 hours after it became active
+// Sessions already running when auto-close shipped count their 24 hours from the release, not from creation.
+const AUTOCLOSE_RELEASE = Date.parse('2026-10-19T18:00:00Z');
+const STALE_MS = 2 * 60 * 1000;   // a phone not heard from in 2 minutes is treated as gone
 const MAX_GROUPS = 36;            // 12 colour/shape pairs, repeated with a number (Teal Triangle 2) for big lectures
 
 async function redis(cmds) {
@@ -29,8 +33,9 @@ const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const hash = (pin) => sha('wl:' + String(pin));
 const keyHash = (key) => sha('wlk:' + String(key));
 const K = (code, part) => NS + ':c:' + code + ':' + part;
-// meta, students, groups, last-seen, answers, legacy connections, version, done, student key hashes, connection pairs
-const parts = ['meta', 's', 'g', 'seen', 'ans', 'conn', 'v', 'done', 'k', 'cx'];
+// meta, students, groups, last-seen, answers, legacy connections, version, done, student key hashes, connection pairs,
+// session-opened time, shared group biographies, auto-close lock
+const parts = ['meta', 's', 'g', 'seen', 'ans', 'conn', 'v', 'done', 'k', 'cx', 'open', 'bio', 'closing'];
 const touch = (code, which = parts) => which.map(p => ['EXPIRE', K(code, p), CLASS_TTL]);
 const obj = (flat) => { const o = {}; for (let i = 0; flat && i < flat.length; i += 2) o[flat[i]] = flat[i + 1]; return o; };
 const jparse = (s, d) => { try { return s == null ? d : JSON.parse(s); } catch (_) { return d; } };
@@ -48,10 +53,11 @@ const DEFAULT_Q = [
   { id: 'hobby', text: 'What are your hobbies?', active: false },
 ];
 
-async function load(code) {
-  const [meta, s, g, seen, ans, v, dn, k, cx] = await redis([
+async function load(code, now = Date.now(), noClose) {
+  const [meta, s, g, seen, ans, v, dn, k, cx, open, bio] = await redis([
     ['GET', K(code, 'meta')], ['HGETALL', K(code, 's')], ['HGETALL', K(code, 'g')], ['HGETALL', K(code, 'seen')],
     ['HGETALL', K(code, 'ans')], ['GET', K(code, 'v')], ['HGETALL', K(code, 'done')], ['HGETALL', K(code, 'k')], ['HGETALL', K(code, 'cx')],
+    ['GET', K(code, 'open')], ['HGETALL', K(code, 'bio')],
   ]);
   if (!meta) return null;
   const students = {}; const so = obj(s); for (const id in so) { const p = jparse(so[id], null); if (p) students[id] = p; }
@@ -67,7 +73,56 @@ async function load(code) {
   m.emailPolicy = policyOf(m.emailPolicy || DEFAULT_EMAIL_POLICY);
   if (!m.groupMode) m.groupMode = 'count';
   if (!m.groupSize) m.groupSize = 4;
-  return { meta: m, students, groups, keys, seen: seenO, answers, done, pairs, v: Number(v || 0) };
+  // Shared biography lines, field "<group>:<lineId>" -> {text, at, by}
+  const bios = {}; const bo = obj(bio);
+  for (const f in bo) { const i = f.indexOf(':'), line = jparse(bo[f], null); if (i < 1 || !line) continue; const gi = Number(f.slice(0, i)); (bios[gi] = bios[gi] || []).push({ id: f.slice(i + 1), ...line }); }
+  for (const gi in bios) bios[gi].sort((a, b) => a.at - b.at || (a.id < b.id ? -1 : 1));
+  const st = { meta: m, students, groups, keys, seen: seenO, answers, done, pairs, bios, v: Number(v || 0), openedAt: open ? Number(open) : null };
+  // Legacy sessions (active before auto-close existed) count from the release.
+  if (!st.openedAt && (m.launched || Object.values(students).some(p => p.status === 'active' && !p.nophone))) st.openedAt = Math.max(m.createdAt || 0, AUTOCLOSE_RELEASE);
+  // A student who moved to a new phone shows up twice until the old phone goes quiet; then the old entry steps aside.
+  const byEmail = {};
+  Object.values(students).forEach(p => { if (p.status === 'active' && !p.nophone && p.email) (byEmail[p.email.toLowerCase()] = byEmail[p.email.toLowerCase()] || []).push(p); });
+  const stale = [];
+  for (const e in byEmail) {
+    const list = byEmail[e]; if (list.length < 2) continue;
+    const newest = list.reduce((x, y) => ((seenO[y.id] || 0) > (seenO[x.id] || 0) ? y : x));
+    list.forEach(p => { if (p !== newest && now - (seenO[p.id] || 0) > STALE_MS && groups[p.id] != null && groups[p.id] === groups[newest.id]) { p.status = 'away'; stale.push(p); } });
+  }
+  if (stale.length) await redis([['HSET', K(code, 's'), ...stale.flatMap(p => [p.id, JSON.stringify(p)])], ['INCR', K(code, 'v')]]);
+  if (!noClose && st.openedAt && now - st.openedAt >= SESSION_MAX_MS) {
+    // Only one request performs the close; the rest reload the result.
+    const [lock] = await redis([['SET', K(code, 'closing'), '1', 'NX', 'EX', 60]]);
+    if (lock === 'OK') {
+      const cmds = closeSession(st, code, now);
+      await redis([['SET', K(code, 'meta'), JSON.stringify(st.meta)], ...cmds, bump(code), ...touch(code, parts.filter(p => p !== 'closing'))]);
+    }
+    return load(code, now, true);
+  }
+  return st;
+}
+
+// End the current session: phone students rejoin with one tap next time, named no-device students stay,
+// unnamed seats, groups, answers, done marks and biographies are cleared.
+function closeSession(st, code, now) {
+  const m = st.meta, cmds = [], keep = [];
+  for (const id in st.students) {
+    const p = st.students[id];
+    p.last = st.groups[id] != null ? st.groups[id] : p.last; p.late = false;
+    if (p.nophone && p.guest) { cmds.push(['HDEL', K(code, 's'), id]); delete st.students[id]; continue; }
+    if (!p.nophone && p.status === 'active') p.status = 'away';
+    keep.push(p);
+  }
+  st.groups = {};
+  Object.assign(m, { launched: false, ended: false, seg: 0, segAccum: 0, segStartedAt: null, running: false, priorMs: 0, pushedPrompt: null, projMode: 'join', projKey: null,
+    session: (m.session || 1) + 1, round: (m.round || 0) + 1, headcount: 0, groupsSent: false, lastClosedAt: now });
+  const manual = keep.filter(p => p.nophone && p.status === 'active');
+  manual.forEach(p => place(st, p, m.avoid === false ? -1 : (p.last != null ? p.last : -1)));
+  cmds.push(['DEL', K(code, 'g')], ['DEL', K(code, 'ans')], ['DEL', K(code, 'done')], ['DEL', K(code, 'bio')], ['DEL', K(code, 'open')]);
+  const flat = []; keep.forEach(p => flat.push(p.id, JSON.stringify(p))); if (flat.length) cmds.push(['HSET', K(code, 's'), ...flat]);
+  const gflat = []; manual.forEach(p => gflat.push(p.id, String(st.groups[p.id]))); if (gflat.length) cmds.push(['HSET', K(code, 'g'), ...gflat]);
+  st.openedAt = null;
+  return cmds;
 }
 
 function present(st) { return Object.values(st.students).filter(p => p && p.status === 'active'); }
@@ -85,7 +140,10 @@ function autoGroup(st, avoid) {
   present(st).forEach(p => { const g = st.groups[p.id]; if (g != null && g < n) sz[g]++; });
   const open = [...sz.keys()].filter(g => !locked[g]);
   const pool = open.length ? open : [...sz.keys()];
-  if (st.meta.groupMode === 'size' && n < MAX_GROUPS && pool.every(g => sz[g] >= st.meta.groupSize)) return n;
+  // Before groups are made, "group size" mode opens a new group when the others are full. After that
+  // (or once class has started) a late joiner only fills the smallest existing group — no one else moves.
+  const settled = st.meta.groupsSent || st.meta.launched;
+  if (st.meta.groupMode === 'size' && !settled && n < MAX_GROUPS && pool.every(g => sz[g] >= st.meta.groupSize)) return n;
   return pool.sort((a, b) => (sz[a] - sz[b]) || ((a === avoid ? 1 : 0) - (b === avoid ? 1 : 0)) || a - b)[0];
 }
 function place(st, p, avoid) { const g = autoGroup(st, avoid); st.groups[p.id] = g; return g; }
@@ -120,6 +178,7 @@ function forStudent(st, sid, now) {
   return { v: st.v, now, base: PUBLIC_BASE, meta, roster, me: {
     id, name, email, linkedin, shareEmail, shareLinkedin, anon, status, late, g: st.groups[sid],
     connections: connectionsFor(st, sid), answers: st.answers[sid] || {}, doneRound: st.done[sid] != null ? st.done[sid] : null,
+    bio: st.groups[sid] != null ? (st.bios[st.groups[sid]] || []).map(l => ({ id: l.id, text: l.text, at: l.at })) : [],
   } };
 }
 function forScreen(st, now) {
@@ -137,7 +196,9 @@ function forTeacher(st, now) {
   const doneIds = Object.keys(st.done).filter(id => st.done[id] === (st.meta.round || 0));
   // Contact details reach the facilitator only when the student chose to share them.
   const students = Object.values(st.students).map(p => ({ ...p, email: p.shareEmail ? p.email || '' : '', linkedin: p.shareLinkedin ? p.linkedin || '' : '' }));
-  return { v: st.v, now, base: PUBLIC_BASE, meta: outMeta(st), students, groups: st.groups, seen: st.seen, answers, connCounts, connTotals: { accepted, pending }, doneIds };
+  const bioCounts = {}; for (const gi in st.bios) bioCounts[gi] = st.bios[gi].length;   // counts only: the text is for the group
+  return { v: st.v, now, base: PUBLIC_BASE, meta: outMeta(st), students, groups: st.groups, seen: st.seen, answers, connCounts, connTotals: { accepted, pending }, doneIds, bioCounts,
+    autoCloseAt: st.openedAt ? st.openedAt + SESSION_MAX_MS : null };
 }
 
 const bump = (code) => ['INCR', K(code, 'v')];
@@ -171,7 +232,7 @@ function manualStudent(st, name, opts, now) {
 }
 
 async function facilitatorAction(code, body, now) {
-  const st = await load(code);
+  const st = await load(code, now);
   if (!st) throw err(404, 'No class with that code');
   if (st.meta.pinHash !== hash(body.pin)) throw err(403, 'Wrong facilitator PIN');
   const m = st.meta, a = body.action, cmds = [], result = { ok: true };
@@ -179,7 +240,7 @@ async function facilitatorAction(code, body, now) {
   const saveStudents = (list) => { const flat = []; list.forEach(p => flat.push(p.id, JSON.stringify(p))); if (flat.length) cmds.push(['HSET', K(code, 's'), ...flat]); };
   const saveGroups = (list) => { const flat = []; list.forEach(p => { if (st.groups[p.id] != null) flat.push(p.id, String(st.groups[p.id])); }); if (flat.length) cmds.push(['HSET', K(code, 'g'), ...flat]); };
   switch (a) {
-    case 'start': m.round = (m.round || 0) + 1; Object.assign(m, { launched: true, ended: false, seg: 0, segAccum: 0, segStartedAt: now, running: true, pushedPrompt: null, projMode: 'instructions', projKey: null, priorMs: 0 }); break;
+    case 'start': cmds.push(['SET', K(code, 'open'), String(now), 'NX']); m.round = (m.round || 0) + 1; Object.assign(m, { launched: true, ended: false, seg: 0, segAccum: 0, segStartedAt: now, running: true, pushedPrompt: null, projMode: 'instructions', projKey: null, priorMs: 0 }); break;
     case 'next': {
       m.round = (m.round || 0) + 1;
       m.priorMs = (m.priorMs || 0) + elapsed();
@@ -226,8 +287,10 @@ async function facilitatorAction(code, body, now) {
       if (mode === 'size') m.groupSize = Math.max(2, Math.min(50, Number(body.size) || m.groupSize || 4));
       m.groupCount = Math.max(1, Math.min(MAX_GROUPS, Number(body.count) || maxG + 1));
       m.locked = (body.locked || m.locked || []).slice(0, m.groupCount).map(Boolean);
+      m.groupsSent = true;
       cmds.push(['DEL', K(code, 'g')]); if (flat.length) cmds.push(['HSET', K(code, 'g'), ...flat]);
-      m.round = (m.round || 0) + 1;
+      // Brand-new groups start a fresh biography and fresh "done" marks; moving a few people keeps both.
+      if (body.reshuffle) { cmds.push(['DEL', K(code, 'bio')]); m.round = (m.round || 0) + 1; }
       break;
     }
     case 'groupMode': {
@@ -278,25 +341,7 @@ async function facilitatorAction(code, body, now) {
       p.name = name; p.guest = false; saveStudents([p]);
       break;
     }
-    case 'newSession': {
-      // Everyone on a phone rejoins with one tap; named no-device students stay in the class; unnamed seats are cleared.
-      const keep = [];
-      for (const id in st.students) {
-        const p = st.students[id];
-        p.last = st.groups[id] != null ? st.groups[id] : p.last; p.late = false;
-        if (p.nophone && p.guest) { cmds.push(['HDEL', K(code, 's'), id]); delete st.students[id]; continue; }
-        if (!p.nophone && p.status === 'active') p.status = 'away';
-        keep.push(p);
-      }
-      st.groups = {};
-      const manual = keep.filter(p => p.nophone && p.status === 'active');
-      manual.forEach(p => place(st, p, m.avoid === false ? -1 : (p.last != null ? p.last : -1)));
-      cmds.push(['DEL', K(code, 'g')], ['DEL', K(code, 'ans')], ['DEL', K(code, 'done')]);
-      saveStudents(keep); saveGroups(manual);
-      m.round = (m.round || 0) + 1; m.headcount = 0;
-      Object.assign(m, { launched: false, ended: false, seg: 0, segAccum: 0, segStartedAt: null, running: false, priorMs: 0, pushedPrompt: null, projMode: 'join', projKey: null, session: (m.session || 1) + 1 });
-      break;
-    }
+    case 'newSession': cmds.push(...closeSession(st, code, now)); break;
     case 'deleteAll': await redis(parts.map(p => ['DEL', K(code, p)])); return { deleted: true };
     default: throw err(400, 'Unknown action');
   }
@@ -316,7 +361,7 @@ async function studentOp(code, b, now) {
   const sid = clean(b.sid, 40), key = String(b.key || '');
   switch (b.op) {
     case 'join': {
-      const st = await load(code);
+      const st = await load(code, now);
       if (!st) throw err(404, 'No class with that code');
       const pr = b.profile || {};
       const name = clean(pr.name, 40);
@@ -331,10 +376,23 @@ async function studentOp(code, b, now) {
       }
       const wasActive = p.status === 'active';
       Object.assign(p, { name, email: em.value, linkedin: clean(pr.linkedin, 160), shareEmail: !!pr.shareEmail, shareLinkedin: !!pr.shareLinkedin, anon: !!pr.anon, status: 'active' });
-      if (!wasActive) p.late = !!(st.meta.launched && st.meta.seg > 0);
+      if (!wasActive && !p.returning) p.late = !!(st.meta.launched && st.meta.seg > 0);
+      delete p.returning;
       const kh = newKey ? keyHash(newKey) : st.keys[id];
+      const cmds = [];
+      // Same student on a new phone (or after clearing the browser): matched by email, they go back to their
+      // own group instead of being placed somewhere new. Their old entry steps aside only if that phone has gone quiet.
+      if (newKey && em.value) {
+        const prev = Object.values(st.students).find(q => q.id !== id && !q.nophone && q.status === 'active' && (q.email || '').toLowerCase() === em.value.toLowerCase() && st.groups[q.id] != null);
+        if (prev) {
+          st.groups[id] = st.groups[prev.id];
+          if (!st.seen[prev.id] || now - st.seen[prev.id] > STALE_MS) { prev.status = 'away'; cmds.push(['HSET', K(code, 's'), prev.id, JSON.stringify(prev)]); }
+          cmds.push(['HSET', K(code, 'g'), id, String(st.groups[id])]);
+          p.late = !!prev.late; p.returning = true;
+        }
+      }
       st.students[id] = p;
-      const cmds = [['HSET', K(code, 's'), id, JSON.stringify(p)], ['HSET', K(code, 'k'), id, kh], ['HSET', K(code, 'seen'), kh, String(now)]];
+      cmds.push(['HSET', K(code, 's'), id, JSON.stringify(p)], ['HSET', K(code, 'k'), id, kh], ['HSET', K(code, 'seen'), kh, String(now)], ['SET', K(code, 'open'), String(now), 'NX']);
       let g = st.groups[id];
       if (g == null || g >= groupCount(st)) { g = place(st, p, st.meta.avoid === false ? -1 : (p.last != null ? p.last : -1)); cmds.push(['HSET', K(code, 'g'), id, String(g)]); }
       cmds.push(bump(code), ...touch(code));
@@ -342,7 +400,7 @@ async function studentOp(code, b, now) {
       return { sid: id, key: newKey || key, g, late: p.late };
     }
     case 'profile': {
-      const st = await load(code); if (!st) throw err(404, 'No class with that code');
+      const st = await load(code, now); if (!st) throw err(404, 'No class with that code');
       const p = verifyStudent(st, sid, key), pr = b.profile || {};
       if (pr.email != null) { const em = checkEmail(pr.email, st.meta.emailPolicy); if (!em.ok) throw err(400, em.error, 'email'); p.email = em.value; }
       if (pr.linkedin != null) p.linkedin = clean(pr.linkedin, 160);
@@ -365,7 +423,7 @@ async function studentOp(code, b, now) {
     }
     // Connections: one hash field per pair, {from, status: pending|accepted|declined}. Contact details are shared only once accepted.
     case 'request': {
-      const st = await load(code); if (!st) throw err(404, 'No class with that code');
+      const st = await load(code, now); if (!st) throw err(404, 'No class with that code');
       verifyStudent(st, sid, key);
       const ids = [...new Set((Array.isArray(b.to) ? b.to : [b.to]).map(x => clean(x, 40)))].filter(id => id && id !== sid).slice(0, 60);
       let outgoing = Object.keys(st.pairs).filter(f => st.pairs[f].from === sid && st.pairs[f].status === 'pending').length;
@@ -385,7 +443,7 @@ async function studentOp(code, b, now) {
       return { ok: true, sent, accepted };
     }
     case 'respond': {
-      const st = await load(code); if (!st) throw err(404, 'No class with that code');
+      const st = await load(code, now); if (!st) throw err(404, 'No class with that code');
       verifyStudent(st, sid, key);
       const from = clean(b.from, 40), f = pairId(sid, from), cur = st.pairs[f];
       if (!cur || cur.status !== 'pending' || cur.from !== from) throw err(404, 'That request is no longer waiting.');
@@ -393,10 +451,31 @@ async function studentOp(code, b, now) {
       return { ok: true };
     }
     case 'cancel': {   // withdraw my request, or remove an accepted connection
-      const st = await load(code); if (!st) throw err(404, 'No class with that code');
+      const st = await load(code, now); if (!st) throw err(404, 'No class with that code');
       verifyStudent(st, sid, key);
       const other = clean(b.id, 40), f = pairId(sid, other), cur = st.pairs[f];
       if (cur && (cur.status === 'accepted' || cur.from === sid)) await redis([['HDEL', K(code, 'cx'), f], bump(code)]);
+      return { ok: true };
+    }
+    // Collective Biography: one shared answer per group. Any member can add, edit or remove any line;
+    // nobody outside the group (including the projector and facilitator) sees the text.
+    case 'bioAdd': case 'bioEdit': case 'bioDel': {
+      const st = await load(code, now); if (!st) throw err(404, 'No class with that code');
+      const p = verifyStudent(st, sid, key), g = st.groups[sid];
+      if (p.status !== 'active' || g == null) throw err(400, 'Join a group first.');
+      const lines = st.bios[g] || [];
+      if (b.op === 'bioAdd') {
+        const text = clean(b.text, 300); if (!text) throw err(400, 'Type a sentence first.');
+        if (lines.length >= 60) throw err(400, 'Your group’s answer is full. Edit or remove a line to add more.');
+        const lid = now.toString(36) + crypto.randomBytes(3).toString('hex');
+        await redis([['HSET', K(code, 'bio'), g + ':' + lid, JSON.stringify({ text, at: now, by: sid })], ['EXPIRE', K(code, 'bio'), CLASS_TTL], bump(code)]);
+        return { ok: true, id: lid };
+      }
+      const lid = clean(b.id, 40), line = lines.find(l => l.id === lid);
+      if (!line) throw err(404, 'That line was already removed.');
+      if (b.op === 'bioDel') { await redis([['HDEL', K(code, 'bio'), g + ':' + lid], bump(code)]); return { ok: true }; }
+      const text = clean(b.text, 300); if (!text) throw err(400, 'Type a sentence, or remove the line instead.');
+      await redis([['HSET', K(code, 'bio'), g + ':' + lid, JSON.stringify({ text, at: line.at, by: line.by, editedBy: sid })], bump(code)]);
       return { ok: true };
     }
     default: throw err(400, 'Unknown request');
@@ -416,7 +495,7 @@ async function handle(req) {
       if (v > 0 && role === 'student' && key && q.seen === '1') await redis([['HSET', K(code, 'seen'), keyHash(key), String(now)]]);
       if (String(v) === String(q.v) && v > 0) return { v, now, same: true };
     }
-    const st = await load(code);
+    const st = await load(code, now);
     if (!st) throw err(404, 'No class with that code');
     if (role === 'teacher') { if (st.meta.pinHash !== hash(pin)) throw err(403, 'Wrong facilitator PIN'); return forTeacher(st, now); }
     if (role === 'screen') return forScreen(st, now);
@@ -436,7 +515,7 @@ async function handle(req) {
       if (RESERVED.includes(code)) throw err(400, 'That code is reserved. Pick another.');
       if (code.length < 3) throw err(400, 'Use a code of at least 3 letters or numbers.');
       if (pin.length < 4) throw err(400, 'PIN must be at least 4 characters');
-      const st = await load(code);
+      const st = await load(code, now, true);
       if (st) {
         if (st.meta.pinHash !== hash(pin)) throw err(409, 'That code is already in use. Pick a different code, or choose “Open my class” if it’s yours.');
         if (!b.fresh) {
@@ -446,7 +525,7 @@ async function handle(req) {
         }
         await redis(parts.map(p => ['DEL', K(code, p)]));
       }
-      await redis([['SET', K(code, 'meta'), JSON.stringify(newMeta(code, b, now))], ['SET', K(code, 'v'), '1'], ...touch(code, ['meta', 'v'])]);
+      await redis([['SET', K(code, 'meta'), JSON.stringify(newMeta(code, b, now))], ['SET', K(code, 'v'), '1'], ...touch(code, ['meta', 'v'])]);   // the session opens when the first student joins
       return { ok: true, created: true };
     }
     case 'auth': await teacherAuth(code, b.pin); return { ok: true };
@@ -461,4 +540,4 @@ module.exports = async (req, res) => {
   catch (e) { res.status(e.status || 500).json({ error: e.message || 'Server error', code: e.code }); }
 };
 module.exports.handle = handle;
-module.exports._internals = { keyHash, pairId, MAX_GROUPS, NS };
+module.exports._internals = { keyHash, pairId, MAX_GROUPS, NS, SESSION_MAX_MS };

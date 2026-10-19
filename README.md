@@ -42,7 +42,9 @@ A full 75-minute class with about 30 phones uses roughly 100,000 database comman
 - When a student joins, their phone gets a secret key. Every student request must carry it, so knowing a classmate's id (which is in the roster) is not enough to read or change their data.
 - Connections are requests: A asks, B accepts or declines. Contact details are shared only after acceptance, and only the fields each student chose to share (off by default). Declines are never revealed to the sender.
 - Facilitator data requires the class PIN. The projector view contains names and groups only.
-- Classes are erased after 60 days without use; **Wrap-up → Delete class data** erases one immediately.
+- A session closes on its own 24 hours after it becomes active (first student joins, or Start). Classes are erased after 60 days without use; **Wrap-up → Delete class data** erases one immediately.
+- Groups change only when the facilitator changes them. Late joiners fill the smallest existing group; a student returning on a new phone (same email) goes back to their own group.
+- Collective Biography: each group writes one shared answer. Any member can add, edit or remove any line; only that group sees the text (the facilitator sees counts).
 
 ## Email rules
 

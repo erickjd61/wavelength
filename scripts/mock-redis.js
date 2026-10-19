@@ -13,7 +13,13 @@ function createMock() {
     const [op, k, ...a] = c;
     switch (String(op).toUpperCase()) {
       case 'GET': { const v = db.get(k); return v == null || v instanceof Map ? null : v; }
-      case 'SET': db.set(k, String(a[0])); ttl.delete(k); return 'OK';
+      case 'SET': {
+        const opts = a.slice(1).map(x => String(x).toUpperCase());
+        if (opts.includes('NX') && db.has(k)) return null;
+        db.set(k, String(a[0])); ttl.delete(k);
+        const ex = opts.indexOf('EX'); if (ex >= 0) ttl.set(k, Number(a[ex + 2]));
+        return 'OK';
+      }
       case 'INCR': { const v = Number(db.get(k) || 0) + 1; db.set(k, String(v)); return v; }
       case 'DEL': ttl.delete(k); return db.delete(k) ? 1 : 0;
       case 'EXISTS': return db.has(k) ? 1 : 0;

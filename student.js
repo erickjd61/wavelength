@@ -195,8 +195,8 @@ function StudentApp({ code, sid, skey, policy, profile, setProfile, lateIntro, o
   if (error && !data) return html`<div class="phone dark-bg"><div class="pad" style="justify-content:center;gap:16px"><div class="h1">Can't reach the class</div><div class="sub">${error}</div><button class="btn btn-white" onClick=${refresh}>Try again</button></div></div>`;
   if (!data) return html`<div class="phone dark-bg"><div class="pad" style="justify-content:center;align-items:center"><${Dots} /></div></div>`;
   if (!me || me.status !== 'active' || me.g == null) return html`<div class="phone dark-bg"><div class="pad" style="justify-content:center;gap:16px">
-      <div class="h1">${me && me.status === 'removed' ? 'You were removed from this class' : 'A new session started'}</div>
-      <div class="sub">${me && me.status === 'removed' ? 'If that was a mistake, rejoin below.' : 'Rejoin to get today’s group.'}</div>
+      <div class="h1">${me && me.status === 'removed' ? 'You were removed from this class' : 'Rejoin your class'}</div>
+      <div class="sub">${me && me.status === 'removed' ? 'If that was a mistake, rejoin below.' : 'A new session started, or you joined on another phone. Rejoin to get your group.'}</div>
       <button class="btn btn-white" onClick=${onRejoin}>Rejoin class</button></div></div>`;
 
   const g = me.g, C = G(g);
@@ -217,6 +217,7 @@ function StudentApp({ code, sid, skey, policy, profile, setProfile, lateIntro, o
   };
   const doneBtn = canDone && html`<${DoneButton} done=${isDone} onClick=${toggleDone} />`;
   const showWrap = meta.ended || segItem.key === 'wrap';
+  const groupTalk = canDone && segItem.key !== 'biography' && pool.length > 0;
 
   const incoming = (me.connections && me.connections.incoming) || [];
   const saveProfile = async (patch) => {
@@ -228,11 +229,13 @@ function StudentApp({ code, sid, skey, policy, profile, setProfile, lateIntro, o
   };
 
   return html`<div class="phone color-bg" style=${{ ...colorVars(g), height: '100dvh', minHeight: 0, overflow: 'hidden' }}>
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:16px 18px 10px;flex-shrink:0">
-      <div style="display:flex;align-items:center;gap:12px;min-width:0">
-        <span class="orb" style="width:44px;height:44px;flex-shrink:0;box-shadow:0 0 0 3px rgba(255,255,255,.25)"><${Shape} g=${g} size=${20} /></span>
-        <div style="min-width:0"><div style="font-size:13px;color:rgba(255,255,255,.75);font-weight:600">Hi ${first(me.name)}</div><div style="font-size:17px;font-weight:800">${gLabel(g)}</div></div>
-      </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px 10px;flex-shrink:0">
+      <button onClick=${() => setSheet('color')} aria-label=${'Your group: ' + gLabel(g) + '. Tap to show your color full screen.'} style="display:flex;align-items:center;gap:12px;min-width:0;flex:1;text-align:left;padding:6px;margin:-6px;border-radius:18px">
+        <span class="orb" style="width:58px;height:58px;flex-shrink:0;box-shadow:0 0 0 3px rgba(255,255,255,.28)"><${Shape} g=${g} size=${27} /></span>
+        <span style="min-width:0;flex:1"><span style="display:block;font-size:12.5px;color:rgba(255,255,255,.78);font-weight:600">Hi ${first(me.name)} · your group</span>
+          <span style="display:block;font-size:21px;font-weight:900;letter-spacing:-.3px;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${gLabel(g)}</span>
+          <span style="display:block;font-size:12.5px;color:rgba(255,255,255,.8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${mates.length ? 'With ' + mates.map(m => first(m.name)).join(', ') : 'Tap to hold up your color'}</span></span>
+      </button>
       <div style="display:flex;gap:8px">
         <button onClick=${() => setBig(!big)} aria-label="Larger text" style=${{ width: '44px', height: '44px', borderRadius: '50%', background: big ? 'rgba(255,255,255,.4)' : 'rgba(255,255,255,.14)', fontWeight: 800, fontSize: '15px' }}>Aa</button>
         <button onClick=${() => setSheet('privacy')} aria-label="Privacy" style="width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.14);font-size:15px;font-weight:900">i</button>
@@ -260,6 +263,8 @@ function StudentApp({ code, sid, skey, policy, profile, setProfile, lateIntro, o
           ${meta.launched && isGame && html`<button class="btn-sm" style="margin-top:16px;background:#fff;color:var(--cd);border-radius:30px" onClick=${() => setSheet('guide')}>How to play</button>`}
         </div>
         ${meta.pushedPrompt && html`<div class="card-white"><div style="font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;opacity:.6">From your instructor</div><div style="font-size:21px;font-weight:800;line-height:1.25;margin-top:8px">${meta.pushedPrompt}</div></div>`}
+        ${groupTalk && html`<${TalkPrompt} pool=${pool} />`}
+        ${meta.launched && !meta.ended && segItem.key === 'biography' && html`<${BioStream} auth=${auth} me=${me} g=${g} mates=${mates} toast=${showToast} refresh=${refresh} />`}
         ${doneBtn}
         ${meta.calledNum && segItem.key === 'molecules' && html`<div class="card-white" style="text-align:center"><div style="font-size:12px;font-weight:800;letter-spacing:1px;text-transform:uppercase;opacity:.6">Make a group of</div><div style="font-size:72px;font-weight:900;line-height:1">${meta.calledNum}</div></div>`}
         ${incoming.length > 0 && !showWrap && html`<button onClick=${() => setTab('connect')} class="card-white" style="display:flex;align-items:center;gap:12px;text-align:left;color:var(--cd)"><span style="flex:1;font-size:15.5px;font-weight:800;line-height:1.3">${incoming.length === 1 ? first(incoming[0].name) + ' wants to connect' : incoming.length + ' classmates want to connect'}</span><span class="btn-sm" style="background:var(--cd);color:#fff">Review</span></button>`}
@@ -268,16 +273,15 @@ function StudentApp({ code, sid, skey, policy, profile, setProfile, lateIntro, o
         ${showWrap && html`<${WrapPick} auth=${auth} data=${data} me=${me} profile=${profile} toast=${showToast} refresh=${refresh} />`}
         ${meta.launched && !meta.ended && html`<div style="display:flex;align-items:center;gap:12px;padding:4px 4px 0;color:rgba(255,255,255,.7);font-size:13.5px"><span style="font-weight:700">Up next</span><span style="flex:1;height:1px;background:rgba(255,255,255,.22)"></span><span>${T.next ? T.next.name : 'You’re all set'}</span></div>`}
       </div>`}
-      ${tab === 'group' && html`<${GroupTab} C=${C} g=${g} mates=${mates} pool=${pool} doneBtn=${doneBtn} />`}
       ${tab === 'connect' && html`<${ConnectTab} auth=${auth} policy=${policy} data=${data} me=${me} profile=${profile} saveProfile=${saveProfile} toast=${showToast} refresh=${refresh} />`}
     </div>
 
     <div class="tabbar">
       <button onClick=${() => setTab('now')} style=${{ color: tab === 'now' ? '#fff' : 'rgba(255,255,255,.55)' }}><span style="width:22px;height:22px;border-radius:50%;border:2.4px solid currentColor;display:flex;align-items:center;justify-content:center"><span style="width:6px;height:6px;border-radius:50%;background:currentColor"></span></span>Now</button>
-      <button onClick=${() => setTab('group')} style=${{ color: tab === 'group' ? '#fff' : 'rgba(255,255,255,.55)' }}><span style="height:22px;display:flex;align-items:center"><${Shape} g=${g} size=${19} /></span>Group</button>
       <button onClick=${() => setTab('connect')} style=${{ color: tab === 'connect' ? '#fff' : 'rgba(255,255,255,.55)' }}><span style="position:relative;width:22px;height:22px;border-radius:8px;border:2.4px solid currentColor;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:800">+${incoming.length > 0 && html`<span aria-label=${incoming.length + ' requests'} style="position:absolute;top:-9px;right:-12px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#fff;color:var(--cd);font-size:11px;font-weight:900;line-height:18px;text-align:center">${incoming.length}</span>`}</span>Connect</button>
     </div>
     ${sheet === 'guide' && html`<${GuideSheet} k=${segItem.key} onClose=${() => setSheet(null)} />`}
+    ${sheet === 'color' && html`<${ColorFull} C=${C} g=${g} mates=${mates} onClose=${() => setSheet(null)} />`}
     ${sheet === 'privacy' && html`<div class="sheet-wrap"><button class="scrim" aria-label="Close" onClick=${() => setSheet(null)}></button><div class="sheet">
       <div class="grab"></div><div style="font-size:22px;font-weight:900">About your privacy</div>
       <div style="font-size:14px;color:rgba(255,255,255,.65);margin-top:8px;line-height:1.5">You always know where an answer goes before you send it.</div>
@@ -405,21 +409,61 @@ function DoneButton({ done, onClick }) {
   </button>`;
 }
 
-function GroupTab({ C, g, mates, pool, doneBtn }) {
-  const [open, setOpen] = useState(false);
-  const [i, setI] = useState(0);
-  return html`<div style="min-height:100%;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;padding:24px 30px 110px">
+// Full-screen colour for holding the phone up so groupmates can find each other.
+function ColorFull({ C, g, mates, onClose }) {
+  return html`<div class="color-bg" role="dialog" aria-label=${'Your group: ' + C.label} style=${{ ...colorVars(g), position: 'fixed', inset: 0, zIndex: 90, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '28px', padding: '24px 30px 110px' }} onClick=${onClose}>
     <div class="orb" style="width:236px;height:236px;animation:wl-glow 3s ease-in-out infinite"><${Shape} g=${g} size=${104} /></div>
     <div style="text-align:center"><div style="font-size:66px;font-weight:900;letter-spacing:-2px;line-height:1">${C.name}</div><div style="font-size:24px;font-weight:800;margin-top:8px"><${Shape} g=${g} size=${22} /> ${C.shapeLabel}</div></div>
-    ${mates.length > 0 && html`<div style="text-align:center;font-size:14.5px;color:rgba(255,255,255,.85);line-height:1.5;max-width:320px">With ${mates.map(m => first(m.name)).join(', ')}</div>`}
-    ${!open && html`<button onClick=${() => setOpen(true)} style="position:absolute;bottom:14px;left:0;right:0;min-height:56px;display:flex;flex-direction:column;align-items:center;gap:4px;color:rgba(255,255,255,.85)"><span style="font-size:22px;line-height:.6">⌃</span><span style="font-size:13.5px;font-weight:700">Tap for a conversation prompt</span></button>`}
-    ${open && html`<div style="position:absolute;bottom:12px;left:14px;right:14px;animation:wl-sheet .34s cubic-bezier(.4,0,.2,1) both">
-      <div style="background:#fff;color:var(--cd);border-radius:24px;padding:18px 22px 20px;box-shadow:0 -12px 44px rgba(0,0,0,.4)">
-        <div style="display:flex;align-items:center;justify-content:space-between"><span style="font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase;opacity:.55">Talk about this</span><button onClick=${() => setOpen(false)} aria-label="Close" style="width:44px;height:44px;margin:-12px -12px -12px 0;font-size:20px;color:rgba(0,0,0,.4)">×</button></div>
-        <div style="font-size:21px;font-weight:800;line-height:1.25;margin-top:6px">${pool[i % pool.length]}</div>
-        <button onClick=${() => setI(i + 1)} style="margin-top:10px;min-height:44px;font-size:14px;font-weight:800;text-decoration:underline">New prompt →</button>
-      </div>${doneBtn && html`<div style="margin-top:10px">${doneBtn}</div>`}</div>`}
-    ${!open && doneBtn && html`<div style="width:100%;max-width:360px">${doneBtn}</div>`}
+    ${mates.length > 0 && html`<div style="text-align:center;font-size:15px;color:rgba(255,255,255,.88);line-height:1.5;max-width:320px">With ${mates.map(m => first(m.name)).join(', ')}</div>`}
+    <button onClick=${onClose} class="btn btn-white" style="position:absolute;left:20px;right:20px;bottom:24px;width:auto;color:var(--cd)">Back</button>
+  </div>`;
+}
+
+// A rotating conversation prompt for group discussions.
+function TalkPrompt({ pool }) {
+  const [i, setI] = useState(0);
+  return html`<div class="card-white">
+    <div style="font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase;opacity:.55">Talk about this with your group</div>
+    <div style="font-size:21px;font-weight:800;line-height:1.25;margin-top:6px">${pool[i % pool.length]}</div>
+    ${pool.length > 1 && html`<button onClick=${() => setI(i + 1)} style="margin-top:8px;min-height:44px;font-size:14px;font-weight:800;text-decoration:underline;color:var(--cd)">New prompt →</button>`}
+  </div>`;
+}
+
+// Collective Biography: the group writes one shared answer. Anyone in the group can add, edit or remove
+// any sentence; only the group sees it.
+function BioStream({ auth, me, g, mates, toast, refresh }) {
+  const lines = me.bio || [];
+  const [text, setText] = useState('');
+  const [editing, setEditing] = useState(null);   // { id, text }
+  const [busy, setBusy] = useState(false);
+  const call = async (body, after) => {
+    setBusy(true);
+    try { await post({ ...auth, ...body }); after && after(); refresh(); } catch (e) { toast(e.message); refresh(); }
+    finally { setBusy(false); }
+  };
+  const add = (e) => { e.preventDefault(); if (text.trim()) call({ op: 'bioAdd', text: text.trim() }, () => setText('')); };
+  return html`<div class="card-white" style="display:flex;flex-direction:column;gap:12px">
+    <div>
+      <div style="font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase;opacity:.55">Your group's biography · ${gLabel(g)}</div>
+      <div style="font-size:22px;font-weight:900;letter-spacing:-.4px;line-height:1.15;margin-top:6px">What's true for all of you?</div>
+      <div style="font-size:13px;opacity:.7;margin-top:4px;line-height:1.4">One shared answer for ${mates.length ? 'you, ' + mates.map(m => first(m.name)).join(', ') : 'your group'}. Anyone in the group can add, edit or remove a sentence. Only your group sees it.</div>
+    </div>
+    <ol style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:8px">
+      ${lines.map((l, i) => editing && editing.id === l.id
+        ? html`<li style="display:flex;flex-direction:column;gap:8px;background:rgba(0,0,0,.04);border-radius:14px;padding:10px">
+            <textarea class="field" rows="2" style="color:#101116;background:#fff;border-color:rgba(0,0,0,.18);font-size:15px" value=${editing.text} onInput=${e => setEditing({ ...editing, text: e.target.value })} aria-label="Edit sentence" maxlength="300"></textarea>
+            <div style="display:flex;gap:8px"><button class="btn-sm" style="color:#b3261e" disabled=${busy} onClick=${() => call({ op: 'bioDel', id: l.id }, () => setEditing(null))}>Remove</button><span style="flex:1"></span>
+              <button class="btn-sm" style="color:var(--cd)" onClick=${() => setEditing(null)}>Cancel</button>
+              <button class="btn-sm" style="background:var(--cd);color:#fff" disabled=${busy || !editing.text.trim()} onClick=${() => call({ op: 'bioEdit', id: l.id, text: editing.text.trim() }, () => setEditing(null))}>Save</button></div>
+          </li>`
+        : html`<li><button onClick=${() => setEditing({ id: l.id, text: l.text })} style="width:100%;display:flex;gap:10px;align-items:flex-start;text-align:left;background:rgba(0,0,0,.04);border-radius:14px;padding:12px 14px;color:var(--cd);min-height:48px" aria-label=${'Edit: ' + l.text}>
+            <span style="font-weight:900;opacity:.45;min-width:16px">${i + 1}</span><span style="flex:1;font-size:15.5px;font-weight:600;line-height:1.4">${l.text}</span><span style="font-size:11px;font-weight:800;opacity:.4;padding-top:3px">EDIT</span></button></li>`)}
+    </ol>
+    ${!lines.length && html`<div style="font-size:14px;opacity:.6">No sentences yet. Start with something you all share — then test it: if anyone says “not me,” change it.</div>`}
+    <form onSubmit=${add} style="display:flex;gap:8px">
+      <input class="field" style="color:#101116;background:rgba(0,0,0,.05);border-color:rgba(0,0,0,.14);font-size:15px" value=${text} onInput=${e => setText(e.target.value)} placeholder="e.g. We all grew up near a lake." maxlength="300" aria-label="Add a sentence to your group's answer" />
+      <button class="btn-sm" type="submit" style="background:var(--cd);color:#fff;flex-shrink:0" disabled=${busy || !text.trim()}>Add</button>
+    </form>
   </div>`;
 }
 

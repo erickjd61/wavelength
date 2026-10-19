@@ -261,3 +261,123 @@ test('polling stays cheap when nothing changed', async () => {
   assert.equal(r.same, true);
   assert.equal(mock.commands - before, 1);
 });
+
+// ---------------- Release 1.1
+const withClock = async (ms, fn) => { const real = Date.now; Date.now = () => ms; try { return await fn(); } finally { Date.now = real; } };
+
+test('a session closes on its own 24 hours after it became active', async () => {
+  const t0 = Date.now();
+  const code = await withClock(t0, () => makeClass());
+  const a = await withClock(t0 + 1000, () => join(code, 'Ari'));
+  await withClock(t0 + 2000, () => fac(code, 'addNoPhone', { names: ['Bo'] }));
+  await withClock(t0 + 3000, () => fac(code, 'start'));
+  // 23 hours later: still the same session.
+  let t = await withClock(t0 + 23 * 3600e3, () => teacher(code));
+  assert.equal(t.meta.session, 1); assert.equal(t.meta.launched, true);
+  assert.equal(t.autoCloseAt, t0 + 1000 + 24 * 3600e3);
+  // 24 hours after the first join: closed exactly once, however many requests arrive.
+  const later = t0 + 1000 + 24 * 3600e3 + 5;
+  const [t1, t2, s1] = await withClock(later, () => Promise.all([teacher(code), teacher(code), me(code, a)]));
+  for (const x of [t1, t2]) { assert.equal(x.meta.session, 2); assert.equal(x.meta.launched, false); }
+  assert.equal(s1.me.status, 'away', 'phone is asked to rejoin');
+  const bo = t1.students.find(p => p.name === 'Bo');
+  assert.equal(bo.status, 'active'); assert.ok(t1.groups[bo.id] != null, 'named no-device student stays grouped');
+  assert.equal(t1.autoCloseAt, null, 'next session opens when someone joins');
+  // Rejoining starts the next 24-hour window.
+  await withClock(later + 60e3, () => post({ op: 'join', code, sid: a.sid, key: a.key, profile: { name: 'Ari', email: 'ari@school.edu' } }));
+  t = await withClock(later + 120e3, () => teacher(code));
+  assert.equal(t.meta.session, 2); assert.equal(t.autoCloseAt, later + 60e3 + 24 * 3600e3);
+});
+
+test('an unused class does not close or bump its session', async () => {
+  const t0 = Date.now();
+  const code = await withClock(t0, () => makeClass());
+  const t = await withClock(t0 + 5 * 24 * 3600e3, () => teacher(code));
+  assert.equal(t.meta.session, 1);
+  const a = await withClock(t0 + 5 * 24 * 3600e3 + 1, () => join(code, 'Cy'));
+  assert.equal((await withClock(t0 + 5 * 24 * 3600e3 + 2, () => me(code, a))).me.status, 'active', 'first student is not kicked out');
+});
+
+test('late joiners fill existing groups; nobody already grouped moves', async () => {
+  const code = await makeClass();
+  await fac(code, 'groupMode', { mode: 'size', size: 2 });
+  const ids = []; for (let i = 0; i < 4; i++) ids.push((await join(code, 'G' + i)).sid);
+  let t = await teacher(code);
+  const before = { ...t.groups };
+  assert.equal(t.meta.groupCount, 2);
+  await fac(code, 'groups', { map: before, mode: 'size', size: 2, count: 2 });   // facilitator sends groups
+  for (let i = 0; i < 3; i++) await join(code, 'Late' + i);
+  t = await teacher(code);
+  assert.equal(t.meta.groupCount, 2, 'no new group opened for late joiners');
+  ids.forEach(id => assert.equal(t.groups[id], before[id], 'existing members stay put'));
+  const sizes = [0, 0]; Object.values(t.groups).forEach(g => sizes[g]++);
+  assert.ok(Math.abs(sizes[0] - sizes[1]) <= 1, 'late joiners spread across existing groups');
+});
+
+test('a student who comes back on a new phone returns to their own group', async () => {
+  const t0 = Date.now();
+  const code = await withClock(t0, () => makeClass());
+  const ids = [];
+  for (let i = 0; i < 6; i++) ids.push(await withClock(t0, () => join(code, 'H' + i, { email: 'h' + i + '@school.edu' })));
+  const map = {}; ids.forEach((x, i) => { map[x.sid] = i % 3; });
+  await withClock(t0, () => fac(code, 'groups', { map, mode: 'count', count: 3 }));
+  // H4 (group 1) loses their phone; 5 minutes later joins on a new one with the same email.
+  const fresh = await withClock(t0 + 5 * 60e3, () => post({ op: 'join', code, profile: { name: 'H4', email: 'H4@School.edu' } }));
+  assert.notEqual(fresh.sid, ids[4].sid);
+  assert.equal(fresh.g, 1);
+  const t = await withClock(t0 + 5 * 60e3, () => teacher(code));
+  assert.equal(t.students.find(p => p.id === ids[4].sid).status, 'away', 'old entry steps aside');
+  assert.equal(t.students.filter(p => p.status === 'active').length, 6, 'no duplicate in the roster');
+  // If the original phone is still active, it is not pushed out (typing someone's email can't kick them).
+  await withClock(t0 + 6 * 60e3, () => get({ code, role: 'student', sid: ids[0].sid, v: '0', seen: '1' }, { 'x-wl-key': ids[0].key }));
+  const dup = await withClock(t0 + 6 * 60e3 + 1, () => post({ op: 'join', code, profile: { name: 'H0', email: 'h0@school.edu' } }));
+  assert.equal(dup.g, 0);
+  assert.equal((await withClock(t0 + 6 * 60e3 + 2, () => me(code, ids[0]))).me.status, 'active');
+});
+
+test('Collective Biography: one shared answer per group, any member edits, group only', async () => {
+  const code = await makeClass();
+  const s = []; for (let i = 0; i < 4; i++) s.push(await join(code, 'B' + i));
+  const map = { [s[0].sid]: 0, [s[1].sid]: 0, [s[2].sid]: 1, [s[3].sid]: 1 };
+  await fac(code, 'groups', { map, mode: 'count', count: 2, reshuffle: true });
+  const add = (x, text) => post({ op: 'bioAdd', code, sid: x.sid, key: x.key, text });
+  const l1 = await add(s[0], 'We all grew up in Indiana.');
+  await add(s[1], 'We all like tacos.');
+  await add(s[2], 'Group two line.');
+  let v0 = (await me(code, s[0])).me.bio, v1 = (await me(code, s[1])).me.bio, v2 = (await me(code, s[2])).me.bio;
+  assert.deepEqual(v0.map(l => l.text), ['We all grew up in Indiana.', 'We all like tacos.']);
+  assert.deepEqual(v1, v0, 'both members see the same shared answer');
+  assert.deepEqual(v2.map(l => l.text), ['Group two line.']);
+  // Anyone in the group can edit or remove any line — but not another group's.
+  await post({ op: 'bioEdit', code, sid: s[1].sid, key: s[1].key, id: l1.id, text: 'We all grew up in the Midwest.' });
+  await fails(post({ op: 'bioEdit', code, sid: s[2].sid, key: s[2].key, id: l1.id, text: 'hijack' }), 404);
+  await fails(post({ op: 'bioDel', code, sid: s[3].sid, key: s[3].key, id: l1.id }), 404);
+  await fails(post({ op: 'bioAdd', code, sid: s[0].sid, key: s[2].key, text: 'x' }), 403, 'rejoin');
+  v0 = (await me(code, s[0])).me.bio;
+  assert.equal(v0[0].text, 'We all grew up in the Midwest.');
+  // Group only: not on the projector, not in the facilitator payload (counts only), not in other groups.
+  const screen = JSON.stringify(await get({ code, role: 'screen' })), tch = await teacher(code);
+  assert.ok(!screen.includes('Midwest') && !JSON.stringify(tch).includes('Midwest'));
+  assert.deepEqual(tch.bioCounts, { 0: 2, 1: 1 });
+  assert.ok(!JSON.stringify(await me(code, s[2])).includes('Midwest'));
+  // Moving one person keeps the answers; making new groups starts fresh.
+  await fac(code, 'groups', { map: { ...map, [s[3].sid]: 0 }, mode: 'count', count: 2 });
+  assert.equal((await me(code, s[3])).me.bio.length, 2, 'moved student now sees their new group’s answer');
+  await fac(code, 'groups', { map, mode: 'count', count: 2, reshuffle: true });
+  assert.equal((await me(code, s[0])).me.bio.length, 0);
+});
+
+test('a duplicate left behind by a phone switch steps aside once the old phone goes quiet', async () => {
+  const t0 = Date.now();
+  const code = await withClock(t0, () => makeClass());
+  const a = await withClock(t0, () => join(code, 'Jen', { email: 'jen@school.edu' }));
+  await withClock(t0, () => fac(code, 'start'));
+  const b = await withClock(t0 + 30e3, () => post({ op: 'join', code, profile: { name: 'Jen', email: 'jen@school.edu' } }));
+  let t = await withClock(t0 + 31e3, () => teacher(code));
+  assert.equal(t.students.filter(p => p.status === 'active').length, 2, 'both kept while the old phone may still be in use');
+  assert.equal(t.students.find(p => p.id === b.sid).late, false, 'returning student is not marked late');
+  await withClock(t0 + 4 * 60e3, () => get({ code, role: 'student', sid: b.sid, v: '0', seen: '1' }, { 'x-wl-key': b.key }));
+  t = await withClock(t0 + 4 * 60e3 + 1, () => teacher(code));
+  assert.deepEqual(t.students.filter(p => p.status === 'active').map(p => p.id), [b.sid]);
+  assert.equal(t.students.find(p => p.id === a.sid).status, 'away');
+});
