@@ -168,7 +168,8 @@ function Reveal({ g, onConfirm }) {
 }
 
 function StudentApp({ code, sid, skey, policy, profile, setProfile, lateIntro, onRejoin }) {
-  const { data, offline, error, errCode, offset, refresh } = usePoll({ code, role: 'student', sid, skey, interval: 3000 });
+  const [after, setAfter] = useState(false);   // class has ended: check for updates less often
+  const { data, offline, error, errCode, offset, refresh } = usePoll({ code, role: 'student', sid, skey, interval: after ? 10000 : 3000 });
   const auth = { code, sid, key: skey };
   useTick(1000);
   const [tab, setTab] = useState('now');
@@ -188,6 +189,7 @@ function StudentApp({ code, sid, skey, policy, profile, setProfile, lateIntro, o
     if (lastG.current != null && lastG.current !== me.g) { setMoved(true); try { navigator.vibrate && navigator.vibrate(200); } catch (_) {} }
     lastG.current = me.g;
   }, [me && me.g]);
+  useEffect(() => { setAfter(!!(meta && meta.ended)); }, [meta && meta.ended]);
   const segKey = meta ? (meta.agenda[meta.seg] || {}).key + ':' + meta.seg : null;
   useEffect(() => { if (segKey && lastSeg.current && lastSeg.current !== segKey) { setCoachOpen(true); setTab('now'); } lastSeg.current = segKey; }, [segKey]);
 
@@ -256,12 +258,13 @@ function StudentApp({ code, sid, skey, policy, profile, setProfile, lateIntro, o
         ${lateCard && meta.launched && html`<div class="card-white"><div style="font-size:12px;font-weight:800;letter-spacing:1px;text-transform:uppercase;opacity:.55">Joined mid-class · you haven't missed anything important</div>
           <div style="font-size:15.5px;font-weight:700;margin-top:8px;line-height:1.4">Look for: ${mates.slice(0, 5).map(m => first(m.name)).join(', ') || 'your color on other phones'}</div>
           <button class="btn-sm" style="margin-top:12px;background:var(--cd);color:#fff" onClick=${() => setLateCard(false)}>Got it</button></div>`}
-        <div class="card" style="padding:22px">
+        ${meta.ended && html`<${EndCard} me=${me} onConnect=${() => setTab('connect')} />`}
+        ${!meta.ended && html`<div class="card" style="padding:22px">
           <div style="display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:rgba(255,255,255,.78)"><span style="width:8px;height:8px;border-radius:50%;background:#fff;animation:wl-livedot 1.4s infinite"></span>${meta.launched ? 'Happening now' : 'Before class'} · ${segLeftLabel}</div>
           <div style="font-size:34px;font-weight:900;letter-spacing:-1.2px;line-height:1.04;margin-top:10px">${meta.launched ? seg.name : 'Class starts soon'}</div>
           <div style="font-size:16.5px;color:rgba(255,255,255,.88);margin-top:8px;line-height:1.4">${meta.launched ? seg.do : 'You’re in. Say hi to someone near you while everyone joins.'}</div>
           ${meta.launched && isGame && html`<button class="btn-sm" style="margin-top:16px;background:#fff;color:var(--cd);border-radius:30px" onClick=${() => setSheet('guide')}>How to play</button>`}
-        </div>
+        </div>`}
         ${meta.pushedPrompt && html`<div class="card-white"><div style="font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;opacity:.6">From your instructor</div><div style="font-size:21px;font-weight:800;line-height:1.25;margin-top:8px">${meta.pushedPrompt}</div></div>`}
         ${groupTalk && html`<${TalkPrompt} pool=${pool} />`}
         ${meta.launched && !meta.ended && segItem.key === 'biography' && html`<${BioStream} auth=${auth} me=${me} g=${g} mates=${mates} toast=${showToast} refresh=${refresh} />`}
@@ -401,6 +404,21 @@ function WrapPick({ auth, data, me, profile, toast, refresh }) {
     ${others.length > 0 && !showAll && html`<button class="btn-sm" style="margin-top:10px;color:var(--cd);text-decoration:underline" onClick=${() => setShowAll(true)}>Met someone from another group? Show everyone (${others.length})</button>`}
     <button class="btn" style="margin-top:14px;background:var(--cd);color:#fff;font-size:16px" disabled=${busy || !picked.size} onClick=${send}>${picked.size ? 'Send ' + picked.size + ' request' + (picked.size === 1 ? '' : 's') : 'Tap people to send requests'}</button>
   </div>`}`;
+}
+
+// Shown once the professor ends class: a clear "you're done" with what's left to do, if anything.
+function EndCard({ me, onConnect }) {
+  const c = me.connections || { accepted: [], incoming: [], outgoing: [] };
+  const n = c.accepted.length, waiting = c.incoming.length, sent = c.outgoing.length;
+  const stat = (num, label) => html`<div style="flex:1;min-width:90px;background:rgba(0,0,0,.05);border-radius:14px;padding:12px 10px;text-align:center"><div style="font-size:26px;font-weight:900;line-height:1">${num}</div><div style="font-size:12px;font-weight:700;opacity:.6;margin-top:4px;line-height:1.25">${label}</div></div>`;
+  return html`<div class="card-white" role="status" style="display:flex;flex-direction:column;gap:14px;padding:22px">
+    <div style="font-size:12px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;opacity:.55">Class is over</div>
+    <div style="font-size:30px;font-weight:900;letter-spacing:-.8px;line-height:1.05">You're all set, ${first(me.name)}.</div>
+    <div style="font-size:15px;line-height:1.45;opacity:.8">You can close this tab whenever you like. Next class, open the same link and you'll be back in with one tap.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">${stat(n, n === 1 ? 'connection made' : 'connections made')}${stat(waiting, waiting === 1 ? 'request for you' : 'requests for you')}${stat(sent, 'waiting on others')}</div>
+    ${waiting > 0 && html`<button class="btn" style="background:var(--cd);color:#fff;min-height:50px;font-size:15.5px" onClick=${onConnect}>Review ${waiting} request${waiting === 1 ? '' : 's'} before you go</button>`}
+    ${waiting === 0 && n > 0 && html`<button class="btn-sm" style="align-self:flex-start;color:var(--cd);text-decoration:underline;padding:0" onClick=${onConnect}>See your connections</button>`}
+  </div>`;
 }
 
 function DoneButton({ done, onClick }) {

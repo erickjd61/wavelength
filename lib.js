@@ -27,6 +27,7 @@ export async function post(body) {
 export function usePoll({ code, role, sid, pin, skey, interval = 2500, enabled = true }) {
   const [state, setState] = useState({ data: null, error: null, offline: false, offset: 0 });
   const ref = useRef({ v: null, data: null, fails: 0, n: 0, kick: null });
+  const iv = useRef(interval); iv.current = interval;   // the interval can change (e.g. slower after class) without restarting polling
   useEffect(() => {
     if (!enabled || !code) return;
     let stop = false, timer = null;
@@ -52,7 +53,8 @@ export function usePoll({ code, role, sid, pin, skey, interval = 2500, enabled =
         r0.fails++;
         if (!stop) setState(s => ({ ...s, error: e.status ? e.message : s.error, status: e.status, errCode: e.code, offline: !e.status && r0.fails >= 2 }));
       }
-      if (!stop) timer = setTimeout(tick, document.hidden ? Math.max(interval, 8000) : r0.fails ? Math.min(10000, interval * (1 + r0.fails)) : interval);
+      const every = iv.current;
+      if (!stop) timer = setTimeout(tick, document.hidden ? Math.max(every, 8000) : r0.fails ? Math.min(10000, every * (1 + r0.fails)) : every);
     };
     ref.current.kick = () => { clearTimeout(timer); tick(); };
     const onVis = () => { if (!document.hidden) ref.current.kick && ref.current.kick(); };

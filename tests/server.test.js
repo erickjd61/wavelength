@@ -339,7 +339,8 @@ test('Collective Biography: one shared answer per group, any member edits, group
   const s = []; for (let i = 0; i < 4; i++) s.push(await join(code, 'B' + i));
   const map = { [s[0].sid]: 0, [s[1].sid]: 0, [s[2].sid]: 1, [s[3].sid]: 1 };
   await fac(code, 'groups', { map, mode: 'count', count: 2, reshuffle: true });
-  const add = (x, text) => post({ op: 'bioAdd', code, sid: x.sid, key: x.key, text });
+  let tick = Date.now();   // distinct timestamps, so the order of lines is well defined
+  const add = (x, text) => withClock(tick += 1000, () => post({ op: 'bioAdd', code, sid: x.sid, key: x.key, text }));
   const l1 = await add(s[0], 'We all grew up in Indiana.');
   await add(s[1], 'We all like tacos.');
   await add(s[2], 'Group two line.');
